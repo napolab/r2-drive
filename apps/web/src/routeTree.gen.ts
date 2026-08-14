@@ -10,33 +10,43 @@
 
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
+import { Route as BBucketIdSplatRouteImport } from './routes/b.$bucketId.$'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
   path: '/',
   getParentRoute: () => rootRouteImport,
 } as any)
+const BBucketIdSplatRoute = BBucketIdSplatRouteImport.update({
+  id: '/b/$bucketId/$',
+  path: '/b/$bucketId/$',
+  getParentRoute: () => rootRouteImport,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
+  '/b/$bucketId/$': typeof BBucketIdSplatRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
+  '/b/$bucketId/$': typeof BBucketIdSplatRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
+  '/b/$bucketId/$': typeof BBucketIdSplatRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/'
+  fullPaths: '/' | '/b/$bucketId/$'
   fileRoutesByTo: FileRoutesByTo
-  to: '/'
-  id: '__root__' | '/'
+  to: '/' | '/b/$bucketId/$'
+  id: '__root__' | '/' | '/b/$bucketId/$'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
+  BBucketIdSplatRoute: typeof BBucketIdSplatRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -48,11 +58,19 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof IndexRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/b/$bucketId/$': {
+      id: '/b/$bucketId/$'
+      path: '/b/$bucketId/$'
+      fullPath: '/b/$bucketId/$'
+      preLoaderRoute: typeof BBucketIdSplatRouteImport
+      parentRoute: typeof rootRouteImport
+    }
   }
 }
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
+  BBucketIdSplatRoute: BBucketIdSplatRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

@@ -8,5 +8,7 @@ export default defineConfig({
   test: {
     name: 'web',
     environment: 'jsdom',
+    // jsdom に足りないブラウザ API を足す(理由は vitest.setup.ts のコメント)。
+    setupFiles: ['./vitest.setup.ts'],
   },
 });
