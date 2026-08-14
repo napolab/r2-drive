@@ -46,6 +46,14 @@
 
 セマンティックトークンは light-first で `bg` / `fg` / `border` / `grid` / `accent` / `danger` の 6 グループ。
 
+### 罫線には 2 種類ある
+
+装飾的な区切り(行の仕切り、カードの輪郭、グリッド線)は `border.subtle` / `default` / `strong` を使う。WCAG 1.4.11(非テキストコントラスト 3:1)の対象外なので、明度を自由に選べる。
+
+一方、**境界線だけがコンポーネントの存在を示す**場合(入力欄、チェックボックス、選択可能なタイル、フォーカスリング)は `border.interactive` / `border.focus` / `accent.solid` を使う。これらは `bg.canvas` に対して 3:1 以上を単体テストで強制している(`tokens/tokens.test.ts`)。
+
+迷ったら `border.interactive`。装飾用途に使っても違反にはならない — 逆に `border.default` を境界線の識別だけに頼るコンポーネントに使うと、AA を割ったまま気付けない。
+
 ## フォント
 
 **`M PLUS 1`(Google Fonts)+ システムスタックのみ。**

@@ -53,6 +53,9 @@ importers:
 
   apps/web:
     dependencies:
+      '@fontsource/m-plus-1':
+        specifier: ^5.3.0
+        version: 5.3.0
       '@hono/cloudflare-access':
         specifier: ^0.4.0
         version: 0.4.0(hono@4.13.2)
@@ -84,6 +87,9 @@ importers:
       '@pandacss/dev':
         specifier: ^1.12.0
         version: 1.12.0(jsdom@30.0.1)(typescript@6.0.2)
+      '@pandacss/preset-base':
+        specifier: ^1.12.0
+        version: 1.12.0
       '@types/react':
         specifier: ^19.2.18
         version: 19.2.18
@@ -675,6 +681,9 @@ packages:
     peerDependenciesMeta:
       '@noble/hashes':
         optional: true
+
+  '@fontsource/m-plus-1@5.3.0':
+    resolution: {integrity: sha512-sFkMHfRPGHBz/qmOuaB7FPCmVDihv5O7DekIqfqDE6rh/NtY9kiPTaNCCshd73EkMw5bowY4M872tfhr6qyaHg==}
 
   '@hono/cloudflare-access@0.4.0':
     resolution: {integrity: sha512-aaXfUOOkdXLcOYn1K3pn2Kt96LSgtUaOfD9ItWjNnsaH5+3bMN12h1bgGy8hQud3aB+u1WKSpEr0Ln+enPQlwA==}
@@ -3186,6 +3195,8 @@ snapshots:
     optional: true
 
   '@exodus/bytes@1.15.1': {}
+
+  '@fontsource/m-plus-1@5.3.0': {}
 
   '@hono/cloudflare-access@0.4.0(hono@4.13.2)':
     dependencies:

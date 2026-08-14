@@ -1,6 +1,7 @@
 /// <reference types="vite/client" />
 import { createRootRoute, HeadContent, Outlet, Scripts } from '@tanstack/react-router';
 
+import { fontFaceCss } from '../themes/fonts';
 import appCss from '../styles.css?url';
 
 import type { ReactNode } from 'react';
@@ -9,6 +10,7 @@ const RootDocument = ({ children }: { readonly children: ReactNode }) => (
   <html lang="ja">
     <head>
       <HeadContent />
+      <style>{fontFaceCss}</style>
     </head>
     <body>
       {children}

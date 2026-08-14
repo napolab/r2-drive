@@ -10,6 +10,7 @@
     "cf-typegen": "wrangler types --env-interface Env --strict-vars=false ./worker-configuration.d.ts"
   },
   "dependencies": {
+    "@fontsource/m-plus-1": "^5.3.0",
     "@hono/cloudflare-access": "^0.4.0",
     "@r2-drive/api": "workspace:*",
     "@tanstack/react-query": "catalog:",
@@ -22,6 +23,7 @@
   "devDependencies": {
     "@cloudflare/vite-plugin": "^1.52.1",
     "@pandacss/dev": "^1.12.0",
+    "@pandacss/preset-base": "^1.12.0",
     "@types/react": "^19.2.18",
     "@types/react-dom": "^19.2.4",
     "@vitejs/plugin-react": "^6.0.5",
