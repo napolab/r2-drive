@@ -15,11 +15,14 @@ const contentTypeOf = (key: string, meta: R2HTTPMetadata | undefined): string =>
 export type ListInput = { readonly bucket: R2Bucket; readonly bucketId: string; readonly prefix: Prefix; readonly cursor: string | undefined };
 
 // exactOptionalPropertyTypes 下では cursor: undefined を明示的に渡せない。
-// キー自体を作るかどうかで分岐する。
-const listOptionsOf = (input: ListInput): R2ListOptions =>
-  input.cursor === undefined
-    ? { prefix: input.prefix, delimiter: '/', limit: PAGE_SIZE, include: ['httpMetadata'] }
-    : { prefix: input.prefix, delimiter: '/', limit: PAGE_SIZE, include: ['httpMetadata'], cursor: input.cursor };
+// cursor キー自体を spread の有無で作るかどうか分岐する。
+const listOptionsOf = (input: ListInput): R2ListOptions => ({
+  prefix: input.prefix,
+  delimiter: '/',
+  limit: PAGE_SIZE,
+  include: ['httpMetadata'],
+  ...(input.cursor === undefined ? {} : { cursor: input.cursor }),
+});
 
 export const listObjects = (input: ListInput): ResultAsync<ObjectPage, DriveError> =>
   fromPromise(input.bucket.list(listOptionsOf(input)), (cause) => new R2OperationError(`list failed: ${input.prefix}`, { cause })).map((listed) => ({
