@@ -1,6 +1,7 @@
 {
   "name": "r2-drive",
   "private": true,
+  "type": "module",
   "scripts": {
     "prepare": "husky",
     "fmt": "pnpm run fmt:oxfmt && pnpm run fmt:oxlint",

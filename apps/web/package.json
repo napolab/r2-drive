@@ -11,6 +11,7 @@
   },
   "dependencies": {
     "@hono/cloudflare-access": "^0.4.0",
+    "@r2-drive/api": "workspace:*",
     "@tanstack/react-query": "catalog:",
     "@tanstack/react-router": "^1.170.27",
     "@tanstack/react-start": "^1.168.44",

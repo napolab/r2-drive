@@ -1,11 +1,11 @@
 import { cloudflareAccess } from '@hono/cloudflare-access';
+import { api } from '@r2-drive/api';
 import handler from '@tanstack/react-start/server-entry';
 import { Hono } from 'hono';
 
 import type { WorkerEnv } from './env';
 
 // このファイルだけが @r2-drive/api を値として import してよい(spec §11.3)。
-// Task 6 以降でここに実 API をマウントする。
 const app = new Hono<{ Bindings: WorkerEnv }>();
 
 // env はリクエスト時にしか存在しないので、ミドルウェア生成を c.env が読める位置に置く。
@@ -25,14 +25,6 @@ app.use('*', (c, next) => {
     }
   }
 });
-
-const api = new Hono<{ Bindings: WorkerEnv }>()
-  .get('/ping', (c) => c.json({ ok: true }, 200))
-  .get('/probe/r2', async (c) => {
-    const listed = await c.env.BUCKET_PHOTOS.list({ limit: 1 });
-
-    return c.json({ count: listed.objects.length }, 200);
-  });
 
 app.route('/api', api);
 
