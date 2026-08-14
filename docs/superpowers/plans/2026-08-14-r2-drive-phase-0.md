@@ -2502,7 +2502,7 @@ git commit -m "feat(api): hc ベースの型付きクライアントと Result �
 - Produces:
   - `resolveFileType(o: ObjectDescriptor): Result<FileTypeMatch, ObjectDescriptor>`
   - `FileTypeMatch = { typeId: string; label: string; Icon: ComponentType<IconProps> }`
-  - `resolveActions(selection: ObjectSelection): readonly ActionDescriptor[]`
+  - `resolveAction(selection: ObjectSelection): Result<ActionDescriptor, ObjectSelection>` — `actionId` で 1 つ引く。一覧を返すのではない
 
 **Phase 0 では `FileTypeCapability`(`Viewer` / `Editor`)を持たない。** ビューアは Phase 2 で 2 種類以上できた時点で spec §5.3 の形にする。実装が 1 つもない拡張点を作らないという §1 の規律に従う。
 
