@@ -198,6 +198,7 @@ export const createRunner =
 | `ObjectAction` | 選択に対する操作 | download / copy-path / delete = 3 | 0 |
 | `ObjectSource` | 一覧のデータ供給元 | `r2ListSource`(0)/ `indexedSource`(1) = 2 | 0 |
 | `IdentityProvider` | 認証主体の解決 | Access / static = 2 | 0 |
+| `ErrorResponder` | `DriveError` → HTTP レスポンスの対応 | not-found / bucket / unauthenticated / precondition / upload = 5 | 0 |
 | `PlaybackResolver` | 再生ソースの解決 | raw-range(2)/ hls(6) = 2 | 2 |
 | `MarkdownExtension` | markdown 記法の 3 点セット | 多数 | 3 |
 | `ObjectHook` | アップロード後処理 | 索引書き込み / サムネイル生成(1)= 2 | 1 |
@@ -343,10 +344,12 @@ const getObject = (bucket: R2Bucket, key: ObjectKey): ResultAsync<R2ObjectBody, 
 
 ### 6.3 `cause` チェーンの再帰探索
 
-連鎖させる以上、トップレベルの `instanceof` は当たらない。消費エッジでは `findCause` を使う。
+連鎖させる以上、トップレベルの `instanceof` は当たらない。**チェーンを外側から1回だけ歩き、欲しいエラーが見つかった時点で止める**のが基本形である。
+
+エラー種別ごとの判別は §8.5 の responder registry が担当する。`findCause` はそれとは別に、edge の判別以外で「結局これはネットワーク障害だったのか」のようにチェーンを掘りたいとき(リトライ判断、クライアント側での復元後の検査)に使う。
 
 ```ts
-// src/server/errors/find-cause.ts
+// packages/core/src/errors/find-cause.ts
 type ErrorPredicate<T extends Error> = (value: unknown) => value is T;
 
 export const isInstanceOf =
@@ -378,6 +381,8 @@ export const describeCauseChain = (value: unknown, depth = 32): readonly string[
 ```
 
 `Result` ではなく `T | undefined` を返すのは意図的である。これはパイプライン途中ではなく**消費エッジでの探索**であり、`modeling-errors-as-classes` が示す早期 return チェーンと同じ形に保つため。`Result` を返すとエッジで `isOk()` + `.value` を書くことになり `chaining-neverthrow-results` の禁止事項に触れる。
+
+`findCause` は `matches(value)` が真になった時点で返るため、チェーンを最後まで歩かない。全走査するのは `describeCauseChain`(ログ用)だけである。
 
 ### 6.4 `.match` は消費エッジ 1 箇所
 
@@ -505,26 +510,122 @@ export const createApiClient = (t: ApiTransport): ApiClient => {
 - **クライアントへ**: `name` と `message` だけ。内側の原因は返さない(R2 のキーやバケット名が漏れる)
 - **クライアント側**: `name` からエラークラスを復元するマッパを 1 つ置く。以降ブラウザ内でも `instanceof` / `findCause` が使える
 
+#### ワイヤ型
+
 ```ts
-const toErrorResponse = (c: Context, error: DriveError) => {
-  c.var.logger.error(c.req.url, describeCauseChain(error));
+// packages/core/src/errors/wire.ts
 
-  const notFound = findCause(error, isInstanceOf(ObjectNotFoundError));
-  if (notFound !== undefined) return c.json({ name: notFound.name, message: notFound.message }, 404);
+// 2xx を絶対に含めないこと。含めた瞬間に成功枝と status が重なり、
+// hc 側で res.ok を書いてもエラー body 型が成功枝に漏れ込む。
+export type ErrorStatusCode = 400 | 401 | 403 | 404 | 409 | 412 | 429 | 500 | 503;
 
-  const precondition = findCause(error, isInstanceOf(PreconditionFailedError));
-  if (precondition !== undefined) return c.json({ name: precondition.name, message: precondition.message }, 412);
+export type ErrorName =
+  | 'BucketNotFoundError'
+  | 'ObjectNotFoundError'
+  | 'UnauthenticatedError'
+  | 'PreconditionFailedError'
+  | 'UploadSessionError'
+  | 'InternalError';
 
-  const upload = findCause(error, isInstanceOf(UploadSessionError));
-  if (upload !== undefined) return c.json({ name: upload.name, message: upload.message, reason: upload.reason }, 409);
+// name で判別できる union。reason を optional にしない。
+export type ErrorBody =
+  | { readonly name: Exclude<ErrorName, 'UploadSessionError'>; readonly message: string }
+  | { readonly name: 'UploadSessionError'; readonly message: string; readonly reason: UploadFailureReason };
 
-  return c.json({ name: 'InternalError', message: 'internal error' }, 500);
+export type ResponseSpec = { readonly status: ErrorStatusCode; readonly body: ErrorBody };
+```
+
+`ErrorName` をエラークラスから導出することはできない。`override name = 'ObjectNotFoundError'` はベースの `Error.name: string` を上書きするため**型は `string` に広がり**、`DriveError['name']` はリテラル union にならない。したがってワイヤ側の union は 1 度だけ手で宣言する。ドリフトのリスクは限定的で、responder を書き忘れた新エラーは `InternalError` に落ちる — それが正しい挙動である。
+
+#### responder registry
+
+エラー → レスポンスの対応も拡張点にする。§5 で「if チェーンが伸びるなら registry にしろ」と決めた以上、エラーエッジだけ手書きの `if` チェーンにする理由がない。
+
+```ts
+// packages/api/src/errors/responder/types.ts
+export type ErrorResponder = Processor<Error, ResponseSpec>;
+```
+
+```ts
+// packages/api/src/errors/responder/object-not-found/index.ts
+export const objectNotFoundResponder: ErrorResponder = {
+  id: 'object-not-found',
+  run: (error) =>
+    error instanceof ObjectNotFoundError
+      ? ok({ status: 404, body: { name: 'ObjectNotFoundError', message: error.message } })
+      : err(error),
 };
 ```
 
-**優先順位は if の並び順であって、チェーンの深さではない。** 「どのエラーが一番行動可能か」で並べる。`UploadSessionError` に包まれた `ObjectNotFoundError` は 404 を返すべきなので `ObjectNotFoundError` が先に来る。
+```ts
+// packages/api/src/errors/responder/registry.ts — specific → broad
+export const errorResponders = [
+  objectNotFoundResponder,
+  bucketNotFoundResponder,
+  unauthenticatedResponder,
+  preconditionFailedResponder,
+  uploadSessionResponder,
+] as const satisfies readonly ErrorResponder[];
 
-ステータスは**リテラルで書く**。これにより `hc` 側の `res.status` によるナローイングが効く。
+const resolveResponse = createRunner(errorResponders);
+
+const INTERNAL_ERROR = { status: 500, body: { name: 'InternalError', message: 'internal error' } } satisfies ResponseSpec;
+
+// cause チェーンを外側から 1 回だけ歩き、最初にマッチしたリンクで確定する。
+// ok が返った時点で以降のリンクは見ない。
+export const respondTo = (value: unknown, depth = 32): ResponseSpec => {
+  if (!(value instanceof Error) || depth <= 0) return INTERNAL_ERROR;
+
+  return resolveResponse(value).match(
+    (spec) => spec,
+    () => respondTo(value.cause, depth - 1),
+  );
+};
+```
+
+消費エッジはこれだけになる。エラー種別が増えても伸びない。
+
+```ts
+const toErrorResponse = (c: Context, error: DriveError) => {
+  c.var.logger.error(c.req.url, describeCauseChain(error));
+  const { status, body } = respondTo(error);
+
+  return c.json(body, status);
+};
+```
+
+#### 優先順位は「チェーンの外側」
+
+**外側のエラーが勝つ。** `UploadSessionError` が `ObjectNotFoundError` を包んでいれば 409 であって 404 ではない。
+
+外側のエラーは「呼び出し元に一番近い層が意図して選んだもの」だからである。「アップロードセッションが失敗した」と包んだのは、その層が「これはもう not-found の話ではない」と判断したということ。ここで内側を優先すると、包む判断が無意味になる。
+
+この選択は規律を 1 つ課す。
+
+> **意味を変えるときだけ包む。変えないなら `mapErr` せずそのまま流す。**
+
+`ObjectNotFoundError` を 404 で出したいなら、そもそも `UploadSessionError` で包まないのが正解になる。
+
+#### Hono RPC との緊張関係
+
+Hono RPC は「(body, status) の組がハンドラで静的に見えていること」を要求するが、**registry は status を実行時に決めるので、その情報を定義上消す。** 3 つの選択肢があった。
+
+| | 内容 | 判定 |
+|---|---|---|
+| A | エラー body を 1 つの union に統一し、status も明示 union にする | **採用** |
+| B | registry はタグだけ返し、エッジで `switch` してリテラルの `c.json` を並べる | status ごとの body 型は正確になるが、エッジの `switch` が伸びる = OCP を捨てる |
+| C | `HTTPException` を throw する | registry は残るが、エラーが RPC 型から完全に消える |
+
+A を選んだのは、**ステータスごとに body 型を変える必要が最初から無い**ためである。クライアントは `name` で判別すると決めており、status 別の body 型は使われない精度になる。使わない精度のために OCP を捨てるのは割に合わない。
+
+結果としてハンドラの戻り型は次のようになり、`200` と `ErrorStatusCode` が素なので `res.ok` のナローイングが効く。
+
+```ts
+| TypedResponse<ObjectPage, 200, 'json'>
+| TypedResponse<ErrorBody, ErrorStatusCode, 'json'>
+```
+
+成功レスポンスのステータスは**リテラルで書く**。`c.json(page, 200)` のように書かないと、この分離が成立しない。
 
 ### 8.6 `Response` → `Result` の唯一の変換点
 
@@ -629,7 +730,7 @@ r2-drive/
    │  └─ src/
    │     ├─ create-runner.ts      … 全拡張点が共有する唯一のディスパッチ実装
    │     ├─ object-descriptor.ts
-   │     └─ errors/               … index.ts find-cause.ts
+   │     └─ errors/               … index.ts find-cause.ts wire.ts
    └─ api/
       └─ src/
          ├─ index.ts              … Hono アプリの値 + AppType。@r2-drive/api
@@ -637,6 +738,7 @@ r2-drive/
          ├─ buckets/  uploads/    … ルート定義
          ├─ r2/                   … registry.ts list.ts get.ts range.ts put.ts delete.ts
          ├─ identity/             … types.ts cloudflare-access.ts static.ts factory.ts
+         ├─ errors/responder/     … registry.ts types.ts object-not-found/ upload-session/ …
          └─ plugins/object-source/… registry.ts types.ts r2-list/
 ```
 
@@ -713,6 +815,7 @@ mise + pnpm + TypeScript v7(`@typescript/native-preview` / tsgo)+ oxlint + oxfmt
 1. `typescript-project-setup` スキルの **`react` variant は現時点でスタブ**であり、React / Vite / panda css 向けのアセットが存在しない。`apps/web` のスキャフォールドはこのスキルを拡張しながら進めることになる
 2. **tsgo(TypeScript v7 native preview)+ Hono RPC の重い型推論 + Panda CSS のコード生成**という組み合わせは実績が確認できていない。型チェックが通るか、IDE が実用的な速度で動くかを最初に確かめる
 3. **oxlint が `no-restricted-imports` を実装しているか未検証。**未対応なら受け入れ基準 6 は別の手段(依存グラフの検査スクリプト、あるいは `eslint-plugin-boundaries` の併用)で満たす
+4. **`c.json(body, status)` に union の `status` を渡したときの挙動が未検証。**§8.5 の A 案はこれに依存している。tsgo + Hono でコンパイルが通り、`res.ok` のナローイングが期待通り効くことを確かめる。通らなければ §8.5 の B 案(エッジで `switch` + `never`)に落とす
 
 ### 11.7 テスト配置
 
