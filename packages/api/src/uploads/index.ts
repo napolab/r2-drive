@@ -1,0 +1,80 @@
+import { UploadSessionError } from '@r2-drive/core';
+import { zValidator } from '@hono/zod-validator';
+import { Hono } from 'hono';
+import { fromPromise } from 'neverthrow';
+import { z } from 'zod';
+
+import { toErrorResponse } from '../errors/to-error-response';
+import { resolveBucket } from '../r2/registry';
+
+import type { HonoEnv } from '../env';
+
+const MAX_PARTS = 10_000;
+
+const createBody = z.object({ key: z.string().min(1), contentType: z.string().min(1) });
+const completeBody = z.object({
+  key: z.string().min(1),
+  parts: z.array(z.object({ partNumber: z.number().int().positive(), etag: z.string().min(1) })).min(1),
+});
+const keyQuery = z.object({ key: z.string().min(1) });
+
+export const uploads = new Hono<HonoEnv>()
+  .post('/:bucketId', zValidator('json', createBody), async (c) => {
+    const { key, contentType } = c.req.valid('json');
+
+    return resolveBucket(c.env, c.req.param('bucketId')).match(
+      async (bucket) =>
+        fromPromise(bucket.createMultipartUpload(key, { httpMetadata: { contentType } }), (cause) => new UploadSessionError('aborted', { cause })).match(
+          (upload) => c.json({ uploadId: upload.uploadId, key: upload.key }, 200),
+          (error) => toErrorResponse(c, error),
+        ),
+      async (error) => toErrorResponse(c, error),
+    );
+  })
+  // サーバー側にセッション状態を持たない。uploadId さえあればどのインスタンスからでもパートを受けられる。
+  .put('/:bucketId/:uploadId/parts/:partNumber', zValidator('query', keyQuery), async (c) => {
+    const partNumber = parseInt(c.req.param('partNumber'), 10);
+    if (!Number.isInteger(partNumber) || partNumber < 1 || partNumber > MAX_PARTS) {
+      return toErrorResponse(c, new UploadSessionError('too-many-parts'));
+    }
+    const body = c.req.raw.body;
+    if (body === null) return toErrorResponse(c, new UploadSessionError('part-too-small'));
+
+    return resolveBucket(c.env, c.req.param('bucketId')).match(
+      async (bucket) => {
+        const upload = bucket.resumeMultipartUpload(c.req.valid('query').key, c.req.param('uploadId'));
+
+        return fromPromise(upload.uploadPart(partNumber, body), (cause) => new UploadSessionError('unknown-upload-id', { cause })).match(
+          // Uppy が ETag ヘッダを読んで complete に渡す。同一オリジンなので CORS 設定は不要。
+          (part) => c.body(null, 200, { etag: part.etag }),
+          (error) => toErrorResponse(c, error),
+        );
+      },
+      async (error) => toErrorResponse(c, error),
+    );
+  })
+  .post('/:bucketId/:uploadId/complete', zValidator('json', completeBody), async (c) => {
+    const { key, parts } = c.req.valid('json');
+
+    return resolveBucket(c.env, c.req.param('bucketId')).match(
+      async (bucket) => {
+        const upload = bucket.resumeMultipartUpload(key, c.req.param('uploadId'));
+
+        return fromPromise(upload.complete(parts.map((p) => ({ partNumber: p.partNumber, etag: p.etag }))), (cause) => new UploadSessionError('unknown-upload-id', { cause })).match(
+          (object) => c.json({ key: object.key, etag: object.httpEtag }, 200),
+          (error) => toErrorResponse(c, error),
+        );
+      },
+      async (error) => toErrorResponse(c, error),
+    );
+  })
+  .delete('/:bucketId/:uploadId', zValidator('query', keyQuery), async (c) =>
+    resolveBucket(c.env, c.req.param('bucketId')).match(
+      async (bucket) =>
+        fromPromise(bucket.resumeMultipartUpload(c.req.valid('query').key, c.req.param('uploadId')).abort(), (cause) => new UploadSessionError('unknown-upload-id', { cause })).match(
+          () => c.json({ aborted: true }, 200),
+          (error) => toErrorResponse(c, error),
+        ),
+      async (error) => toErrorResponse(c, error),
+    ),
+  );
