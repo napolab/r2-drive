@@ -696,23 +696,23 @@ catalog:
 
 ### 11.6 ツーリング
 
-`typescript-project-setup` スキルのスタックに揃える: mise + pnpm + TypeScript v7(`@typescript/native-preview` / tsgo)+ oxlint + oxfmt + vitest + husky + lint-staged。
+mise + pnpm + TypeScript v7(`@typescript/native-preview` / tsgo)+ oxlint + oxfmt + vitest + husky。設定は `www.napochaan.com` から移植した。
 
-`.oxlintrc.json` の immutable/functional ルールが本設計に与える影響:
+**規律の所在を取り違えないこと。** `typescript-project-setup` スキルには immutable/functional な厳格ルール群(`.push` 禁止、`Promise.all` 禁止、`max-lines-per-function`)を持つ `.oxlintrc.json` が入っているが、**`www.napochaan.com` が実際に使っている `.oxlintrc.json` はもっと軽い**(`func-style: expression` / `prefer-arrow-callback` / `unicorn/filename-case` / `react-perf`)。関数型の規律は lint ではなく `.claude/rules/*.md` に散文として置かれ、レビューで守られている。本リポジトリは後者に揃える。
 
-| ルール | 影響 |
+`.oxlintrc.json` に 1 つだけ独自ルールを足している。
+
+| ルール | 目的 |
 |---|---|
-| `func-style: deny expression`(アロー関数のみ) | 本 spec のコード片はすべて準拠済み |
-| `no-restricted-properties` の `.push` 禁止 | `createRunner` / `findCause` / `describeCauseChain` は再帰と spread で書いてある |
-| `no-restricted-properties` の `Promise.all/allSettled/race/any` 禁止 | 並列 R2 操作が必要な場面では `ResultAsync.combine` を使う。パートの並列送信は Uppy 内部が担当するので自前コードには現れない |
-| `no-restricted-properties` の `.then/.catch/.finally` 禁止 | neverthrow チェーンに統一する方針と一致 |
-| `typescript/array-type: array` | `readonly T[]` を使う(`ReadonlyArray<T>` ではなく) |
-| `max-lines-per-function: 50` | `toErrorResponse` の `instanceof` チェーンが伸びたら分割する |
+| `no-restricted-imports` の `@r2-drive/api` 禁止(`apps/web/src/worker.ts` のみ override で許可) | §11.3 の依存方向を機械的に強制し、将来の Worker 分割可能性を守る |
 
-**未確認のリスクが 2 つある。** どちらも walking skeleton(§4.2)で確かめる。
+`.claude/rules/*.md` のうち本設計に直接効くもの: `functional-programming.md`(不変性)、`function-style.md`(アロー関数のみ)、`typescript.md`(`satisfies` over `as`)、`no-barrel.md`、`naming.md`(kebab-case)、`colocation.md`、`tdd.md`。
+
+**未確認のリスクが 3 つある。** すべて walking skeleton(§4.2)で確かめる。
 
 1. `typescript-project-setup` スキルの **`react` variant は現時点でスタブ**であり、React / Vite / panda css 向けのアセットが存在しない。`apps/web` のスキャフォールドはこのスキルを拡張しながら進めることになる
 2. **tsgo(TypeScript v7 native preview)+ Hono RPC の重い型推論 + Panda CSS のコード生成**という組み合わせは実績が確認できていない。型チェックが通るか、IDE が実用的な速度で動くかを最初に確かめる
+3. **oxlint が `no-restricted-imports` を実装しているか未検証。**未対応なら受け入れ基準 6 は別の手段(依存グラフの検査スクリプト、あるいは `eslint-plugin-boundaries` の併用)で満たす
 
 ### 11.7 テスト配置
 

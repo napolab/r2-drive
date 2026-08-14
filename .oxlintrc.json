@@ -1,0 +1,60 @@
+{
+  "$schema": "./node_modules/oxlint/configuration_schema.json",
+  "plugins": ["react-perf"],
+  "categories": {},
+  "rules": {
+    "func-style": ["error", "expression"],
+    "prefer-arrow-callback": "error",
+    "unicorn/filename-case": [
+      "error",
+      {
+        "cases": {
+          "kebabCase": true
+        }
+      }
+    ],
+    "no-restricted-imports": [
+      "error",
+      {
+        "paths": [
+          {
+            "name": "@r2-drive/api",
+            "message": "Import the Hono app value only from apps/web/src/worker.ts. Everywhere else use @r2-drive/api/client (types + client factory) so packages/api stays deployable as its own Worker."
+          }
+        ]
+      }
+    ],
+    "react-perf/jsx-no-new-function-as-prop": "warn",
+    "react-perf/jsx-no-new-object-as-prop": "warn",
+    "react-perf/jsx-no-new-array-as-prop": "warn"
+  },
+  "settings": {
+    "jsx-a11y": {
+      "polymorphicPropName": null,
+      "components": {},
+      "attributes": {}
+    },
+    "react": {
+      "formComponents": [],
+      "linkComponents": [],
+      "version": null,
+      "componentWrapperFunctions": []
+    },
+    "vitest": {
+      "typecheck": false
+    }
+  },
+  "env": {
+    "builtin": true
+  },
+  "globals": {},
+  "overrides": [
+    {
+      "files": ["apps/web/src/worker.ts"],
+      "rules": {
+        "no-restricted-imports": "off"
+      }
+    }
+  ],
+  "ignorePatterns": ["**/styled-system/**", "**/routeTree.gen.ts", "**/worker-configuration.d.ts", ".claude/worktrees", "**/*.test.{ts,tsx}"]
+}
