@@ -13,9 +13,11 @@ const PATHS = {
 } satisfies Record<Glyph, string>;
 
 export const FileIcon = ({ size, glyph }: Props) => (
-  // fill/stroke/strokeWidth は Panda の css() を通さず SVG のプレゼンテーション
-  // 属性として直接指定する(理由は styles.css.ts のコメント参照)。
-  <svg className={s.icon} width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5} aria-hidden="true" data-glyph={glyph}>
+  // fill="none" / stroke="currentColor" だけを SVG のプレゼンテーション属性として
+  // 直接指定する(理由は styles.css.ts のコメント参照)。currentColor の実効色は
+  // 祖先の `color` に依存する — 今日は global-css.ts の `html { color: fg.default }`
+  // に解決されるが、この経路自体はテストで縛られていない(report 参照)。
+  <svg className={s.icon} width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true" data-glyph={glyph}>
     <path d={PATHS[glyph]} />
   </svg>
 );

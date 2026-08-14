@@ -1,10 +1,9 @@
 import { css } from '@styled/css';
 
-// fill / stroke / strokeWidth は Panda の css() に乗せない。preset-base では
-// fill/stroke は colors トークンカテゴリ、strokeWidth は borderWidths トークン
-// カテゴリにマップされる(strictTokens: true)。'currentColor' や '1.5' はどちらの
-// カテゴリにも無い値でビルドが落ちる(詳細は report 参照)。グリフの線色・線幅は
-// テーマの色/枠線トークンではなくアイコン自体の描画情報なので、index.tsx 側で
-// SVG のプレゼンテーション属性として直接指定する。ここはレイアウト上の懸念
-// (flexShrink)だけを扱う。
-export const icon = css({ flexShrink: 0 });
+// fill/stroke は colors トークンカテゴリにマップされ(strictTokens: true)、
+// 'none'/'currentColor' に等価物が無いため css() を経由できない
+// (design-direction.md「SVG のペイント系プロパティの例外」参照)。index.tsx 側で
+// SVG のプレゼンテーション属性として直接指定する。
+// strokeWidth は borderWidths トークンに等価物がある(hairline/default/strong)
+// ので、例外の対象外として css() に留める。
+export const icon = css({ flexShrink: 0, strokeWidth: 'default' });
