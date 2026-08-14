@@ -216,7 +216,6 @@ export const semanticTokens = defineSemanticTokens({
       solid: { value: '{colors.blue.9}' },
       solidHover: { value: '{colors.blue.10}' },
       text: { value: '{colors.blue.9}' },
-      border: { value: '{colors.blue.7}' },
     },
     danger: {
       solid: { value: '{colors.red.11}' },
