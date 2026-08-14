@@ -6,7 +6,7 @@ import { z } from 'zod';
 import { toErrorResponse } from '../errors/to-error-response';
 import { resolveObjectSource } from '../plugins/object-source/registry';
 import { getObject } from '../r2/get';
-import { parseRangeHeader } from '../r2/range';
+import { parseRangeHeader, resolveContentRange } from '../r2/range';
 import { bucketDescriptors, resolveBucket } from '../r2/registry';
 
 import type { HonoEnv } from '../env';
@@ -50,32 +50,19 @@ export const buckets = new Hono<HonoEnv>()
 
             // R2 に渡した range はこの spec そのものなので、応答ヘッダも spec から直接計算する
             // (object.range を読み返すと 3 変分の判別可能ユニオンが `in` では narrow しきれない)。
+            // start/end/length の算術自体は range.ts の resolveContentRange に抽出済み(単体テストあり)。
+            const range = resolveContentRange(spec, head.size);
+            headers.set('content-length', `${range.length}`);
+
             switch (spec.kind) {
-              case 'whole': {
-                headers.set('content-length', `${head.size}`);
-
+              case 'whole':
                 return new Response(object.body, { status: 200, headers });
-              }
-              case 'offset': {
-                const length = head.size - spec.offset;
-                headers.set('content-range', `bytes ${spec.offset}-${spec.offset + length - 1}/${head.size}`);
-                headers.set('content-length', `${length}`);
+              case 'offset':
+              case 'window':
+              case 'suffix':
+                headers.set('content-range', `bytes ${range.start}-${range.end}/${range.total}`);
 
                 return new Response(object.body, { status: 206, headers });
-              }
-              case 'window': {
-                headers.set('content-range', `bytes ${spec.offset}-${spec.offset + spec.length - 1}/${head.size}`);
-                headers.set('content-length', `${spec.length}`);
-
-                return new Response(object.body, { status: 206, headers });
-              }
-              case 'suffix': {
-                const start = head.size - spec.suffix;
-                headers.set('content-range', `bytes ${start}-${head.size - 1}/${head.size}`);
-                headers.set('content-length', `${spec.suffix}`);
-
-                return new Response(object.body, { status: 206, headers });
-              }
               default: {
                 const _exhaustive: never = spec;
                 throw new Error(`unhandled range spec: ${JSON.stringify(_exhaustive)}`);

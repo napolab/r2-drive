@@ -31,6 +31,7 @@ describe('GET /buckets/:bucketId/content/*', () => {
 
     expect(res.status).toBe(206);
     expect(await res.text()).toBe('hij');
+    expect(res.headers.get('content-range')).toBe('bytes 7-9/10');
   });
 
   it('bytes=7- は開区間', async () => {
@@ -38,6 +39,7 @@ describe('GET /buckets/:bucketId/content/*', () => {
 
     expect(res.status).toBe(206);
     expect(await res.text()).toBe('hij');
+    expect(res.headers.get('content-range')).toBe('bytes 7-9/10');
   });
 
   it('複数レンジは 416', async () => {

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { parseRangeHeader } from './range';
+import { parseRangeHeader, resolveContentRange } from './range';
 
 describe('parseRangeHeader', () => {
   it('ヘッダが無ければ whole', () => {
@@ -33,5 +33,27 @@ describe('parseRangeHeader', () => {
 
   it('壊れたヘッダは whole として扱う', () => {
     expect(parseRangeHeader('garbage', 1000)).toEqual({ kind: 'whole' });
+  });
+
+  it('bytes=-0 は末尾 0 バイトなので unsatisfiable', () => {
+    expect(parseRangeHeader('bytes=-0', 1000)).toEqual({ kind: 'unsatisfiable' });
+  });
+});
+
+describe('resolveContentRange', () => {
+  it('whole は先頭から末尾までを指す', () => {
+    expect(resolveContentRange({ kind: 'whole' }, 10)).toEqual({ start: 0, end: 9, length: 10, total: 10 });
+  });
+
+  it('window はそのまま start/end に写る', () => {
+    expect(resolveContentRange({ kind: 'window', offset: 2, length: 3 }, 10)).toEqual({ start: 2, end: 4, length: 3, total: 10 });
+  });
+
+  it('offset は末尾までを指す', () => {
+    expect(resolveContentRange({ kind: 'offset', offset: 7 }, 10)).toEqual({ start: 7, end: 9, length: 3, total: 10 });
+  });
+
+  it('suffix は末尾から N バイトを指す', () => {
+    expect(resolveContentRange({ kind: 'suffix', suffix: 3 }, 10)).toEqual({ start: 7, end: 9, length: 3, total: 10 });
   });
 });
