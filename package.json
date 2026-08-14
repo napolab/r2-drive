@@ -1,13 +1,25 @@
 {
   "name": "r2-drive",
-  "version": "1.0.0",
-  "description": "",
-  "main": "index.js",
+  "private": true,
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "prepare": "husky",
+    "fmt": "pnpm run fmt:oxfmt && pnpm run fmt:oxlint",
+    "fmt:oxfmt": "oxfmt --write .",
+    "fmt:oxlint": "oxlint --fix .",
+    "lint": "pnpm run lint:oxfmt && pnpm run lint:oxlint",
+    "lint:oxfmt": "oxfmt --check .",
+    "lint:oxlint": "oxlint .",
+    "typecheck": "tsgo --noEmit -p tsconfig.base.json",
+    "test": "vitest run"
   },
-  "keywords": [],
-  "author": "",
-  "license": "ISC",
+  "devDependencies": {
+    "@types/node": "^22.20.1",
+    "@typescript/native-preview": "7.0.0-dev.20260707.2",
+    "@vitest/coverage-v8": "^4.1.10",
+    "husky": "^9.1.7",
+    "oxfmt": "^0.63.0",
+    "oxlint": "^1.78.0",
+    "vitest": "^4.1.10"
+  },
   "packageManager": "pnpm@10.34.5"
 }
