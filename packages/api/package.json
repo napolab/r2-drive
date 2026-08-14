@@ -17,6 +17,7 @@
     "zod": "catalog:"
   },
   "devDependencies": {
-    "@cloudflare/vitest-pool-workers": "^0.21.3"
+    "@cloudflare/vitest-pool-workers": "^0.21.3",
+    "@types/range-parser": "^1.2.7"
   }
 }
