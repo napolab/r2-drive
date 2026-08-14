@@ -68,6 +68,9 @@ Phase 1 の D1 索引だけで検索要求の大半が満たせる可能性が�
 | 状態 | TanStack Query | 一覧のキャッシュ / プリフェッチ / 楽観的更新 |
 | エラー | neverthrow + `Error` サブクラス | 既存規約に準拠 |
 | テスト | vitest + `@cloudflare/vitest-pool-workers` | 本物の R2 binding 相手に検証できる |
+| リポジトリ | pnpm workspaces のモノレポ | Phase 6 の Rust コンテナが確実に別 Worker になる。分割をデプロイ単位の変更に落とす(§11) |
+| ツーリング | mise + pnpm + tsgo + oxlint + oxfmt + vitest + husky | `typescript-project-setup` スキルのスタックに準拠 |
+| コンテナ | Rust + Cloudflare Containers(Phase 6) | ffmpeg によるトランスコード。`apps/transcoder/` |
 
 ### 採用ライブラリと判断
 
@@ -137,11 +140,17 @@ Worker のストリーミングパススルーは CPU 時間をほぼ消費し�
 
 R2 binding は静的にしか宣言できないため、実行時に任意のバケット名を開くことはできない。これは制約ではなく、資格情報を保管しなくて済むという利点として受け入れる。
 
-### 4.5 Worker を分けない判断
+### 4.5 Worker を分けない判断(ただし分割可能に保つ)
 
-ブラウザがバイナリ面を直接叩く必要がある(Uppy のパート送信、`<video src>`)ため、API を非公開 Worker にするとブラウザから到達できず、フロント Worker がプロキシする羽目になって service binding の利点が消える。
+**Phase 0 では単一 Worker とする。** ブラウザがバイナリ面を直接叩く必要がある(Uppy のパート送信、`<video src>`)ため、API を非公開 Worker にするとブラウザから到達できず、フロント Worker がプロキシする羽目になって service binding の利点が消える。
 
-**分けるべき時**: Worker のスクリプトサイズ上限に当たったとき(React SSR + Hono + エディタが同居する Phase 3 以降で現実的な脅威)。そのとき差し替えるのは `createApiClient` 1 箇所で済むよう、トランスポートを判別可能ユニオンにしておく(§8.4)。
+**分けるべき時**は 3 つある。
+
+1. Worker のスクリプトサイズ上限に当たったとき(React SSR + Hono + エディタが同居する Phase 3 以降で現実的な脅威)
+2. Phase 6 のトランスコード基盤(Rust コンテナを持つ Worker)が登場するとき — **これは確定している**
+3. API と SSR で独立にデプロイしたくなったとき
+
+したがって **コードは最初からモノレポで分離しておき、分割を「パッケージ境界の張り替え」ではなく「デプロイ単位の変更」に落とす**(§11)。分割時に差し替わるのは `createApiClient` のトランスポート 1 箇所である(§8.4)。
 
 ## 5. プラグインアーキテクチャ
 
@@ -589,38 +598,125 @@ R2 の条件付き書き込み `put(key, body, { onlyIf: { etagDoesNotMatch: '*'
 
 **ただしトレードオフが 1 つある。** 現行の `pack()` は 2/3/4 列の 3 レイアウトを CSS 変数で吐き、ブレークポイントに CSS だけで選ばせている(完全 SSR・計測ゼロ)。仮想化するには「今どの列数か」を JS が知る必要があり、コンテナ幅の計測 → クライアントコンポーネント化が避けられない。**SSR 純度と仮想化はここで交換になる。** Phase 4 の設計時に判断する。
 
-## 11. ディレクトリ構成(Phase 0 時点)
+## 11. モノレポ構成
 
-`file-colocation` スキルを TanStack Start に翻訳する(`_components/` は Start の規約に合わせ `-components/`)。
+### 11.1 方針
 
-以下は Phase 0 で存在するファイルのみを示す。`plugins/playback/` は Phase 2、`plugins/markdown-extension/` は Phase 3、`plugins/object-hook/` と `plugins/object-source/indexed/` は Phase 1 で追加される。
+**分割を後から可能にするのではなく、最初からパッケージ境界として存在させ、デプロイ単位だけを後で変える。** Phase 6 の Rust コンテナは確実に別 Worker になるため、この境界は投機ではなく確定した要件である。
+
+pnpm workspaces を使う。ビルドツール(turbo / nx)は入れない — パッケージ数が一桁のうちは `pnpm -r` で足り、入れると「なぜあるのか分からない設定」が増える。
+
+### 11.2 構成
 
 ```
-src/
-  worker.ts                       … Hono + Start の合成。アプリの入口
-  plugins/
-    create-runner.ts              … 全拡張点が共有する唯一のディスパッチ実装
-    file-type/       registry.ts types.ts markdown/ image/ video/ audio/ opaque/
-    object-action/   registry.ts types.ts download/ copy-path/ delete/
-    object-source/   registry.ts types.ts r2-list/
-  routes/
-    b.$bucketId.$.tsx
-    b.$bucketId.$.styles.css.ts
-    -components/
-  components/<name>/              … 横断再利用
-    index.tsx  styles.css.ts  <name>.test.tsx
-  server/
-    api/
-      index.ts                    … AppType の集約点
-      client.ts                   … hcWithType / createApiClient
-      buckets/  uploads/
-    identity/  types.ts cloudflare-access.ts static.ts factory.ts
-    r2/        registry.ts list.ts get.ts range.ts put.ts delete.ts types.ts
-    upload/    create.ts part.ts complete.ts abort.ts
-    errors/    index.ts find-cause.ts
+r2-drive/
+├─ mise.toml                      … node / pnpm のピン
+├─ pnpm-workspace.yaml            … packages 定義 + catalog
+├─ tsconfig.base.json
+├─ apps/
+│  └─ web/                        … Phase 0 で唯一デプロイされる Worker
+│     ├─ wrangler.jsonc           … R2 binding 群 / workers_dev: false
+│     ├─ panda.config.ts
+│     └─ src/
+│        ├─ worker.ts             … Hono + Start の合成。@r2-drive/api を import できる唯一の場所
+│        ├─ routes/               … b.$bucketId.$.tsx / .styles.css.ts / -components/
+│        ├─ components/<name>/    … index.tsx / styles.css.ts / <name>.test.tsx
+│        └─ plugins/
+│           ├─ file-type/         … registry.ts types.ts markdown/ image/ video/ audio/ opaque/
+│           └─ object-action/     … registry.ts types.ts download/ copy-path/ delete/
+└─ packages/
+   ├─ core/                       … 純 TS。React も Workers API も参照しない
+   │  └─ src/
+   │     ├─ create-runner.ts      … 全拡張点が共有する唯一のディスパッチ実装
+   │     ├─ object-descriptor.ts
+   │     └─ errors/               … index.ts find-cause.ts
+   └─ api/
+      └─ src/
+         ├─ index.ts              … Hono アプリの値 + AppType。@r2-drive/api
+         ├─ client.ts             … hcWithType / createApiClient / ApiTransport。@r2-drive/api/client
+         ├─ buckets/  uploads/    … ルート定義
+         ├─ r2/                   … registry.ts list.ts get.ts range.ts put.ts delete.ts
+         ├─ identity/             … types.ts cloudflare-access.ts static.ts factory.ts
+         └─ plugins/object-source/… registry.ts types.ts r2-list/
 ```
 
-各プラグインは `run()` を直接叩いて単体テストできる。runner も他のプラグインも登場しない。
+**Phase 0 時点の構成である。** 後続フェーズで生えるもの:
+
+| 追加物 | 場所 | Phase |
+|---|---|---|
+| `plugins/object-hook/`、`object-source/indexed/`、D1 スキーマ | `packages/api` | 1 |
+| `plugins/playback/` | `packages/api` | 2 |
+| `plugins/markdown-extension/`、エディタ | `apps/web` + `packages/editor`(抽出するなら) | 3 |
+| `apps/transcoder/`(Rust crate + Dockerfile) | 新規 | 6 |
+| `apps/transcoder-worker/`(DO + Container binding) | 新規 | 6 |
+
+`file-colocation` スキルを TanStack Start に翻訳して適用する(`_components/` は Start の規約に合わせ `-components/`)。styles は対象ファイルの隣に `styles.css.ts` として置く。
+
+### 11.3 パッケージの依存方向(これが分割可能性の実体)
+
+```
+apps/web ──→ @r2-drive/api/client ──→ @r2-drive/core
+    │                                      ↑
+    └──→ @r2-drive/api (worker.ts のみ) ───┘
+```
+
+**`packages/api` は `apps/web` に依存しない。** これが守られている限り、`packages/api` はいつでも独立した Worker になれる。
+
+分割を「守られていることを願う規約」ではなく**機械的に強制する**。oxlint の `no-restricted-imports` で `@r2-drive/api`(Hono アプリの値)の import を `apps/web/src/worker.ts` 1 ファイルに限定する。他の場所は型と client ファクトリだけを持つ `@r2-drive/api/client` しか触れない。
+
+分割時に変わるのは:
+
+1. `apps/web/src/worker.ts` から `@r2-drive/api` の import が消える
+2. `ApiTransport` に `{ kind: 'service-binding'; origin: string; binding: Fetcher }` が 1 変分増える
+3. `wrangler.jsonc` に service binding が 1 つ増える
+
+`ApiTransport` を判別可能ユニオンにし `switch` + `never` で消費しているため、変分を足した瞬間に対応漏れが全部コンパイルエラーになる(§8.4)。**この変分を今は足さない** — 実装が 1 つしかない拡張は作らないという §1 の規律に従う。
+
+### 11.4 内部パッケージはソースを直接消費する
+
+`packages/*` は npm 公開しない内部パッケージなので、`exports` を `./src/index.ts` に向け、**パッケージごとのビルド手順を持たない**。Vite と `@cloudflare/vite-plugin` がそのままトランスパイルする。dist の生成・watch・依存順ビルドという monorepo の定番の痛みを丸ごと回避できる。
+
+型解決は `tsconfig.base.json` の `paths` で行う。TypeScript project references は入れない — Hono のドキュメントは RPC の IDE 性能対策として推奨しているが、その主要因は `hcWithType`(§8.3)で既に潰している。IDE が実際に重くなってから導入する。
+
+### 11.5 バージョンの一元管理
+
+Hono のドキュメントは **RPC を使う場合バックエンドとフロントエンドで Hono のバージョンを一致させること**を要求している。pnpm の catalog で一元管理する。
+
+```yaml
+# pnpm-workspace.yaml
+packages: ['apps/*', 'packages/*']
+catalog:
+  hono: ^4.x
+  react: ^19.x
+  neverthrow: ^8.2.0
+  zod: ^4.x
+```
+
+各パッケージは `"hono": "catalog:"` と書く。バージョン不一致による RPC 型崩壊が構造的に起きなくなる。
+
+### 11.6 ツーリング
+
+`typescript-project-setup` スキルのスタックに揃える: mise + pnpm + TypeScript v7(`@typescript/native-preview` / tsgo)+ oxlint + oxfmt + vitest + husky + lint-staged。
+
+`.oxlintrc.json` の immutable/functional ルールが本設計に与える影響:
+
+| ルール | 影響 |
+|---|---|
+| `func-style: deny expression`(アロー関数のみ) | 本 spec のコード片はすべて準拠済み |
+| `no-restricted-properties` の `.push` 禁止 | `createRunner` / `findCause` / `describeCauseChain` は再帰と spread で書いてある |
+| `no-restricted-properties` の `Promise.all/allSettled/race/any` 禁止 | 並列 R2 操作が必要な場面では `ResultAsync.combine` を使う。パートの並列送信は Uppy 内部が担当するので自前コードには現れない |
+| `no-restricted-properties` の `.then/.catch/.finally` 禁止 | neverthrow チェーンに統一する方針と一致 |
+| `typescript/array-type: array` | `readonly T[]` を使う(`ReadonlyArray<T>` ではなく) |
+| `max-lines-per-function: 50` | `toErrorResponse` の `instanceof` チェーンが伸びたら分割する |
+
+**未確認のリスクが 2 つある。** どちらも walking skeleton(§4.2)で確かめる。
+
+1. `typescript-project-setup` スキルの **`react` variant は現時点でスタブ**であり、React / Vite / panda css 向けのアセットが存在しない。`apps/web` のスキャフォールドはこのスキルを拡張しながら進めることになる
+2. **tsgo(TypeScript v7 native preview)+ Hono RPC の重い型推論 + Panda CSS のコード生成**という組み合わせは実績が確認できていない。型チェックが通るか、IDE が実用的な速度で動くかを最初に確かめる
+
+### 11.7 テスト配置
+
+各プラグインは `run()` を直接叩いて単体テストできる(runner も他のプラグインも登場しない)。テストは対象ファイルの隣に置く。`packages/api` のテストは `@cloudflare/vitest-pool-workers` で本物の R2 binding を相手に走らせるため、`apps/web` とは vitest 設定が分かれる。
 
 ## 12. テスト方針
 
@@ -637,6 +733,7 @@ src/
 3. マウスを使わずにナビゲート・複数選択・削除ができる
 4. 5GB のファイルがアップロードでき、途中で中断してもサーバー側にゴミが残らない(abort される)
 5. `workers_dev` が `false` で、Access 未認証のリクエストが Worker に到達しない
+6. `@r2-drive/api`(Hono アプリの値)の import が `apps/web/src/worker.ts` 以外に現れると lint が落ちる — 将来の Worker 分割可能性が機械的に守られている
 
 **4 の「中断からの再開」は含まない。** `uploadId` の永続化が必要であり、独立した機能である。中断時に確実に abort する、までを Phase 0 の責任とする。
 
@@ -647,5 +744,7 @@ src/
 | markdown エディタを TipTap にするか Milkdown にするか | Phase 3 開始時 |
 | Phase 5(Vectorize 意味検索)の要否 | Phase 1 を使ってから |
 | Phase 4 で SSR 純度と仮想化のどちらを取るか | Phase 4 設計時 |
-| Worker を分割するか(スクリプトサイズ上限) | 上限に当たったとき |
+| `packages/api` を独立 Worker として切り出す時期 | スクリプトサイズ上限に当たったとき、または Phase 6(遅くともここで分割は発生する) |
+| エディタを `packages/editor` に切り出すか | Phase 3 設計時 |
 | `ObjectHook` に `hookable` を使うか自作するか | Phase 1 設計時 |
+| `typescript-project-setup` スキルの `react` variant をどう埋めるか | Phase 0 のスキャフォールド時 |
