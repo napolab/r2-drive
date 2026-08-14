@@ -4,6 +4,7 @@ import { Hono } from 'hono';
 import { z } from 'zod';
 
 import { toErrorResponse } from '../errors/to-error-response';
+import { deleteObject } from '../r2/delete';
 import { resolveObjectSource } from '../plugins/object-source/registry';
 import { getObject } from '../r2/get';
 import { parseRangeHeader, resolveContentRange } from '../r2/range';
@@ -72,6 +73,18 @@ export const buckets = new Hono<HonoEnv>()
           (error) => toErrorResponse(c, error),
         );
       },
+      async (error) => toErrorResponse(c, error),
+    );
+  })
+  .delete('/:bucketId/objects/:path{.+}', async (c) => {
+    const key = c.req.param('path');
+
+    return resolveBucket(c.env, c.req.param('bucketId')).match(
+      async (bucket) =>
+        deleteObject(bucket, key).match(
+          (deleted) => c.json({ deleted }, 200),
+          (error) => toErrorResponse(c, error),
+        ),
       async (error) => toErrorResponse(c, error),
     );
   });
