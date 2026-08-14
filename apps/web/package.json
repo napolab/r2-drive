@@ -3,10 +3,11 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "prepare": "panda codegen",
     "dev": "vite",
     "build": "vite build",
     "deploy": "wrangler deploy",
-    "cf-typegen": "wrangler types --env-interface Env ./worker-configuration.d.ts"
+    "cf-typegen": "wrangler types --env-interface Env --strict-vars=false ./worker-configuration.d.ts"
   },
   "dependencies": {
     "@hono/cloudflare-access": "^0.4.0",
