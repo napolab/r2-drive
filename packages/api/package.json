@@ -1,0 +1,22 @@
+{
+  "name": "@r2-drive/api",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./client": "./src/client.ts"
+  },
+  "dependencies": {
+    "@hono/cloudflare-access": "^0.4.0",
+    "@hono/zod-validator": "^0.7.0",
+    "@r2-drive/core": "workspace:*",
+    "hono": "catalog:",
+    "mime": "^4.1.0",
+    "neverthrow": "catalog:",
+    "range-parser": "^1.2.1",
+    "zod": "catalog:"
+  },
+  "devDependencies": {
+    "@cloudflare/vitest-pool-workers": "^0.21.3"
+  }
+}
