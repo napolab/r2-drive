@@ -48,7 +48,7 @@ r2-drive/
 ├─ pnpm-workspace.yaml                Task 1
 ├─ package.json                       Task 1(ルート。scripts のみ)
 ├─ tsconfig.base.json                 Task 1
-├─ vitest.workspace.ts                Task 1
+├─ vitest.config.ts                   Task 1(ルート。test.projects で各パッケージを束ねる)
 ├─ apps/web/
 │  ├─ package.json                    Task 2
 │  ├─ wrangler.jsonc                  Task 2
@@ -111,7 +111,7 @@ r2-drive/
 - Create: `pnpm-workspace.yaml`
 - Modify: `package.json`(既存の雛形を置き換え)
 - Create: `tsconfig.base.json`
-- Create: `vitest.workspace.ts`
+- Create: `vitest.config.ts`(ルート)
 - Create: `packages/.gitkeep`, `apps/.gitkeep`
 
 **Interfaces:**
@@ -207,10 +207,18 @@ mise exec -- pnpm add -D -w \
 
 `noImplicitOverride` は必須。これが無いと `override name = '...'` を書き忘れてもエラーにならず、`modeling-errors-as-classes` の規約が効かなくなる。
 
-- [ ] **Step 6: `vitest.workspace.ts` を書く**
+- [ ] **Step 6: ルートの `vitest.config.ts` を書く**
+
+vitest 4 で `test.workspace` は削除された。`test.projects` を使う。
 
 ```ts
-export default ['apps/*/vitest.config.ts', 'packages/*/vitest.config.ts'];
+import { defineConfig } from 'vitest/config';
+
+export default defineConfig({
+  test: {
+    projects: ['apps/*/vitest.config.ts', 'packages/*/vitest.config.ts'],
+  },
+});
 ```
 
 - [ ] **Step 7: husky を有効にする**
