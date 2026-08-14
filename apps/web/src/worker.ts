@@ -1,5 +1,5 @@
 import { cloudflareAccess } from '@hono/cloudflare-access';
-import { api } from '@r2-drive/api';
+import { api, identityMiddleware } from '@r2-drive/api';
 import handler from '@tanstack/react-start/server-entry';
 import { Hono } from 'hono';
 
@@ -25,6 +25,8 @@ app.use('*', (c, next) => {
     }
   }
 });
+// Access 検証(署名)の後段で、生のクレームを Identity に正規化する。
+app.use('*', identityMiddleware);
 
 app.route('/api', api);
 
