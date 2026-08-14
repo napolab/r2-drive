@@ -6,6 +6,8 @@ paths:
 
 # File and Directory Naming Conventions
 
+Rust crates under `apps/transcoder/` follow Rust conventions (`snake_case` modules), not the rules below. Everything else in TypeScript-land is kebab-case.
+
 ## Kebab-Case Everywhere
 
 All files and directories use kebab-case:

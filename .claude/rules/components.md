@@ -1,7 +1,6 @@
 ---
 paths:
   - "apps/*/src/**/*.{ts,tsx}"
-  - "packages/*/src/**/*.{ts,tsx}"
 ---
 
 # Component Development Rules

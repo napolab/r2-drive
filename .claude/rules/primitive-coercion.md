@@ -3,7 +3,6 @@ description: Ban Boolean/String/Number wrapper coercions and Number.*; use expli
 paths:
   - "apps/*/src/**/*.{ts,tsx}"
   - "packages/*/src/**/*.{ts,tsx}"
-  - "worker/**/*.{ts,tsx}"
 ---
 
 Never use the `Boolean` / `String` / `Number` wrapper functions for coercion, and never use `Number.parseInt` / `Number.parseFloat`.
