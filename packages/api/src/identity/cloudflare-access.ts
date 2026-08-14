@@ -8,6 +8,8 @@ type AccessPayload = { readonly sub?: string; readonly email?: string; readonly 
 type GetIdentityResponse = { readonly name?: string; readonly email?: string; readonly groups?: readonly { readonly name: string }[] };
 
 // identity_nonce をキーに get-identity の結果を寝かせる。このクレームはまさにその用途で存在する。
+// キーは `${sub}:${nonce}`。isolate 内でのユーザー間分離を、nonce がユーザーごとに大域一意である
+// という Cloudflare 側の保証だけに委ねない — このコード自身が sub で分離する。
 const identityCache = new Map<string, Identity>();
 
 const decodePayload = (jwt: string): AccessPayload | undefined => {
@@ -20,10 +22,11 @@ const decodePayload = (jwt: string): AccessPayload | undefined => {
   }
 };
 
+// このプロバイダは、同じチェーン内でより早く Access の署名検証が走っていない限りマウントしてはならない。
+// ここは検証済みペイロードの正規化のみを行う(署名検証はしない)。
 export const cloudflareAccessIdentity: IdentityProviderFactory = (env) => ({
   id: 'cloudflare-access',
   resolve: (request) => {
-    // 署名検証は前段の @hono/cloudflare-access が済ませている。ここは正規化だけ。
     const jwt = request.headers.get('Cf-Access-Jwt-Assertion');
     if (jwt === null) return errAsync(new UnauthenticatedError('missing Cf-Access-Jwt-Assertion'));
     const payload = decodePayload(jwt);
@@ -36,28 +39,39 @@ export const cloudflareAccessIdentity: IdentityProviderFactory = (env) => ({
     const { sub, email, identity_nonce: nonce } = payload;
     if (sub === undefined || email === undefined) return errAsync(new UnauthenticatedError('assertion lacks sub/email'));
 
-    const cached = nonce === undefined ? undefined : identityCache.get(nonce);
+    const cacheKey = nonce === undefined ? undefined : `${sub}:${nonce}`;
+    const cached = cacheKey === undefined ? undefined : identityCache.get(cacheKey);
     if (cached !== undefined) return okAsync(cached);
+
+    // displayName は常に存在する。無ければプロバイダが email に落とす責務を持つ。
+    // groups は get-identity が失敗すると [] に潰れる — 認可の入力にするなら types.ts のコメント参照。
+    const buildIdentity = (detail: GetIdentityResponse): Identity =>
+      ({
+        kind: 'user',
+        id: sub,
+        email,
+        displayName: detail.name ?? email,
+        groups: (detail.groups ?? []).map((g) => g.name),
+      }) satisfies Identity;
 
     return fromPromise(
       fetch(`https://${env.ACCESS_TEAM}.cloudflareaccess.com/cdn-cgi/access/get-identity`, {
         headers: { cookie: request.headers.get('cookie') ?? '' },
-      }).then((res) => (res.ok ? res.json<GetIdentityResponse>() : ({} as GetIdentityResponse))),
+      }).then((res) => {
+        if (!res.ok) throw new Error(`get-identity responded with status ${res.status}`);
+
+        return res.json<GetIdentityResponse>();
+      }),
       (cause) => new UnauthenticatedError('get-identity failed', { cause }),
     )
-      .orElse(() => okAsync({} as GetIdentityResponse))
-      .map((detail): Identity => {
-        // displayName は常に存在する。無ければプロバイダが email に落とす責務を持つ。
-        const identity = {
-          kind: 'user',
-          id: sub,
-          email,
-          displayName: detail.name ?? email,
-          groups: (detail.groups ?? []).map((g) => g.name),
-        } satisfies Identity;
-        if (nonce !== undefined) identityCache.set(nonce, identity);
+      .map((detail) => {
+        // 本物の detail が取れたときだけキャッシュする。ネットワーク障害 / 非 2xx / 不正 JSON はここを通らない
+        // ので、一時的な障害でユーザーが isolate の生存期間中ずっと email フォールバックに固定されることはない。
+        const identity = buildIdentity(detail);
+        if (cacheKey !== undefined) identityCache.set(cacheKey, identity);
 
         return identity;
-      });
+      })
+      .orElse(() => okAsync(buildIdentity({})));
   },
 });
