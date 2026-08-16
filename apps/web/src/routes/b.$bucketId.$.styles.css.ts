@@ -5,11 +5,24 @@ import { css } from '@styled/css';
 // 対象外の充填値なので strictTokens のエスケープハッチで書く。
 export const pageRoot = css({
   display: 'grid',
-  gridTemplateRows: 'auto 1fr',
-  gap: 'element',
+  gridTemplateRows: 'minmax(0, 1fr)',
   height: '[100dvh]',
   p: 'page',
   bg: 'bg.canvas',
+});
+
+export const headerRoot = css({
+  display: 'flex',
+  alignItems: 'center',
+  justifyContent: 'space-between',
+  gap: 'element',
+  minW: '[0]',
+});
+
+export const headingRoot = css({
+  display: 'grid',
+  gap: 'inline',
+  minW: '[0]',
 });
 
 // バケット / プレフィックスはパスそのもの。システム注釈なので等幅で組む。
@@ -22,4 +35,16 @@ export const heading = css({
   overflow: 'hidden',
   textOverflow: 'ellipsis',
   whiteSpace: 'nowrap',
+});
+
+export const uploadError = css({
+  color: 'danger.text',
+  fontSize: 'sm',
+});
+
+export const actionNotice = css({
+  color: 'fg.muted',
+  fontSize: 'sm',
+  '&[data-kind="error"]': { color: 'danger.text' },
+  '&[data-kind="success"]': { color: 'accent.text' },
 });

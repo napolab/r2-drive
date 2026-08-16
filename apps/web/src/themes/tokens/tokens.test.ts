@@ -70,6 +70,13 @@ describe('shape tokens', () => {
   it('grid cell is the 24px module', () => {
     expect(tokens.sizes.gridCell.value).toBe('24px');
   });
+  it('file tile dimensions stay on the 24px module', () => {
+    expect(tokens.sizes.fileTileWidth.value).toBe('168px');
+    expect(tokens.sizes.fileTileHeight.value).toBe('240px');
+    expect(tokens.sizes.fileTileGap.value).toBe('12px');
+    expect(tokens.sizes.fileNameArea.value).toBe('48px');
+    expect(tokens.sizes.filePreviewIcon.value).toBe('72px');
+  });
 });
 
 describe('motion tokens', () => {

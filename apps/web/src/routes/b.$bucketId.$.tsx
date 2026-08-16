@@ -4,18 +4,38 @@ import { useCallback, useMemo } from 'react';
 
 import { getApiClient } from '../api/client';
 import { objectsQuery, toPrefix } from '../queries/objects';
-import { ObjectList } from './-components/object-list/index';
+import { BucketObjectActions } from './-components/bucket-object-actions/index';
+import { BucketUploadSession } from './-components/bucket-upload-session/index';
 import * as styles from './b.$bucketId.$.styles.css';
 
-// Task 15 が削除 UI と一緒に配線する。ここでは新しい関数を毎 render 作らないことだけ守る。
-const ignoreSelection = () => undefined;
+import type { ApiClient } from '@r2-drive/api/client';
+import type { ObjectDescriptor } from '@r2-drive/core';
+
+const getContentUrl = (object: ObjectDescriptor): string => {
+  const client = getApiClient();
+  return client.buckets[':bucketId'].content[':path{.+}'].$url({ param: { bucketId: object.bucketId, path: object.key } }).toString();
+};
 
 const RouteComponent = () => {
   const { bucketId, _splat } = Route.useParams();
   const prefix = toPrefix(_splat);
+  const client = getApiClient();
+
+  return (
+    <main className={styles.pageRoot}>
+      <BucketUploadSession client={client} bucketId={bucketId} prefix={prefix}>
+        <BucketWorkspace client={client} bucketId={bucketId} prefix={prefix} />
+      </BucketUploadSession>
+    </main>
+  );
+};
+
+type BucketWorkspaceProps = { readonly client: ApiClient; readonly bucketId: string; readonly prefix: string };
+
+const BucketWorkspace = ({ client, bucketId, prefix }: BucketWorkspaceProps) => {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
-  const { data, fetchNextPage, hasNextPage, isFetchingNextPage } = useSuspenseInfiniteQuery(objectsQuery(getApiClient(), bucketId, prefix));
+  const { data, fetchNextPage, hasNextPage, isFetchingNextPage } = useSuspenseInfiniteQuery(objectsQuery(client, bucketId, prefix));
 
   const folders = useMemo(() => data.pages.flatMap((page) => page.folders), [data.pages]);
   const objects = useMemo(() => data.pages.flatMap((page) => page.objects), [data.pages]);
@@ -31,9 +51,9 @@ const RouteComponent = () => {
   // ネットワークを待たずに描画される(受け入れ基準 2)。
   const handlePrefetchFolder = useCallback(
     (next: string) => {
-      void queryClient.prefetchInfiniteQuery(objectsQuery(getApiClient(), bucketId, next));
+      void queryClient.prefetchInfiniteQuery(objectsQuery(client, bucketId, next));
     },
-    [bucketId, queryClient],
+    [bucketId, client, queryClient],
   );
 
   // カーソルが残っているときだけ次を取る。fetchNextPage は取得中の重複呼び出しを
@@ -43,20 +63,18 @@ const RouteComponent = () => {
   }, [fetchNextPage, hasNextPage]);
 
   return (
-    <main className={styles.pageRoot}>
-      <h1 className={styles.heading}>
-        {bucketId}/{prefix}
-      </h1>
-      <ObjectList
-        folders={folders}
-        objects={objects}
-        onSelectionChange={ignoreSelection}
-        onOpenFolder={handleOpenFolder}
-        onPrefetchFolder={handlePrefetchFolder}
-        onLoadMore={handleLoadMore}
-        isLoadingMore={isFetchingNextPage}
-      />
-    </main>
+    <BucketObjectActions
+      client={client}
+      bucketId={bucketId}
+      prefix={prefix}
+      folders={folders}
+      objects={objects}
+      getContentUrl={getContentUrl}
+      onOpenFolder={handleOpenFolder}
+      onPrefetchFolder={handlePrefetchFolder}
+      onLoadMore={handleLoadMore}
+      isLoadingMore={isFetchingNextPage}
+    />
   );
 };
 

@@ -132,6 +132,13 @@ export const tokens = defineTokens({
     targetMin: { value: '24px' },
     targetComfortable: { value: '44px' },
     headerHeight: { value: '72px' },
+    // Finder / Explorer 型の object tile。幅 7 cell × 高さ 10 cell、
+    // 名前 2 cell、preview icon 3 cell。gap は 1/2 cell。
+    fileTileWidth: { value: '168px' },
+    fileTileHeight: { value: '240px' },
+    fileTileGap: { value: '12px' },
+    fileNameArea: { value: '48px' },
+    filePreviewIcon: { value: '72px' },
   },
 
   opacity: {
