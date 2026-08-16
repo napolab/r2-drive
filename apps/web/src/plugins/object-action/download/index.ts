@@ -25,7 +25,12 @@ export const downloadAction: ObjectAction = {
               const anchor = document.createElement('a');
               anchor.href = url.toString();
               anchor.download = object.name;
-              anchor.click();
+              document.body.appendChild(anchor);
+              try {
+                anchor.click();
+              } finally {
+                anchor.remove();
+              }
             }
           },
         })
