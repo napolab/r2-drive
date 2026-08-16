@@ -1,0 +1,29 @@
+// `cp wrangler.jsonc.example wrangler.jsonc` して、環境固有の値を埋めてから使う。
+// wrangler.jsonc は .gitignore 済み(.dev.vars と同じ規約)。
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "r2-drive",
+  "main": "src/worker.ts",
+  "compatibility_date": "2026-08-01",
+  "compatibility_flags": ["nodejs_compat"],
+  // Access は Worker の前段にいるだけなので、workers.dev に直接叩かれると素通りする。
+  // 受け入れ基準 5。絶対に true にしないこと。
+  "workers_dev": false,
+  // IDENTITY_PROVIDER は fail-closed にする(Ruling 8)。既定は "access" で、
+  // ローカル開発だけ .dev.vars で "static" に落とす。設定を忘れたときに
+  // 「認証が無効」ではなく「認証が有効」に倒れる側を既定にしておく。
+  "vars": {
+    // Cloudflare Zero Trust のチーム名(<team>.cloudflareaccess.com の <team> の部分)。
+    "ACCESS_TEAM": "REPLACE_WITH_ACCESS_TEAM",
+    // Zero Trust ダッシュボードのアプリケーション AUD タグ。
+    // プレースホルダのままデプロイすると全リクエストが 401 になる(fail-closed なので想定通り)。
+    "ACCESS_AUD": "REPLACE_WITH_AUD_TAG",
+    "IDENTITY_PROVIDER": "access",
+  },
+  // binding 名はコード側(packages/api の registry)と対応するので変えない。
+  // bucket_name だけを自分の R2 バケット名に置き換える。
+  "r2_buckets": [
+    { "binding": "BUCKET_PHOTOS", "bucket_name": "REPLACE_WITH_PHOTOS_BUCKET" },
+    { "binding": "BUCKET_MEDIA", "bucket_name": "REPLACE_WITH_MEDIA_BUCKET" },
+  ],
+}

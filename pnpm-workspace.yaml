@@ -1,0 +1,11 @@
+packages:
+  - 'apps/*'
+  - 'packages/*'
+
+catalog:
+  '@tanstack/react-query': ^5.101.4
+  hono: ^4.13.2
+  neverthrow: ^8.2.0
+  react: ^19.2.8
+  react-dom: ^19.2.8
+  zod: ^4.1.12

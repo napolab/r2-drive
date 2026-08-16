@@ -1,0 +1,12 @@
+{
+  "name": "@r2-drive/core",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./*": "./src/*.ts"
+  },
+  "dependencies": {
+    "neverthrow": "catalog:"
+  }
+}

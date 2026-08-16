@@ -1,0 +1,6 @@
+# ローカル開発用の上書き。`cp .dev.vars.example .dev.vars` して使う(.dev.vars は gitignore 済み)。
+#
+# wrangler.jsonc の既定は "access"(fail-closed)。ローカルには Cloudflare Access が
+# 前段に居ないため、開発時だけ "static" に落として Access の検証を飛ばす。
+# Access 枝そのものを試したいときは、この行をコメントアウトして起動する。
+IDENTITY_PROVIDER=static

@@ -1,0 +1,24 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": ["ES2023", "DOM", "DOM.Iterable"],
+    "module": "Preserve",
+    "moduleResolution": "bundler",
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "noImplicitOverride": true,
+    "exactOptionalPropertyTypes": true,
+    "verbatimModuleSyntax": true,
+    "jsx": "react-jsx",
+    "skipLibCheck": true,
+    "noEmit": true,
+    "paths": {
+      "@r2-drive/core": ["./packages/core/src/index.ts"],
+      "@r2-drive/core/*": ["./packages/core/src/*"],
+      "@r2-drive/api": ["./packages/api/src/index.ts"],
+      "@r2-drive/api/client": ["./packages/api/src/client.ts"],
+      "@styled/*": ["./apps/web/styled-system/*"]
+    }
+  },
+  "include": ["apps/**/*.ts", "apps/**/*.tsx", "packages/**/*.ts", "packages/**/*.tsx", "*.ts"]
+}

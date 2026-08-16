@@ -5,5 +5,16 @@
   "singleQuote": true,
   "semi": true,
   "trailingComma": "all",
-  "ignorePatterns": ["**/styled-system/**/*", "**/.tanstack/**/*", "**/dist/**/*", ".wrangler/**/*", ".claude/**/*", "**/CLAUDE.md", "**/worker-configuration.d.ts", "**/routeTree.gen.ts"]
+  "ignorePatterns": [
+    "**/styled-system/**/*",
+    "**/.tanstack/**/*",
+    "**/dist/**/*",
+    ".wrangler/**/*",
+    ".claude/**/*",
+    "**/CLAUDE.md",
+    "**/AGENTS.md",
+    "**/worker-configuration.d.ts",
+    "**/routeTree.gen.ts",
+    "docs/**/*"
+  ]
 }

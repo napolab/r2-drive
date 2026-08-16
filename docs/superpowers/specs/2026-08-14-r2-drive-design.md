@@ -847,7 +847,22 @@ mise + pnpm + TypeScript v7(`@typescript/native-preview` / tsgo)+ oxlint + oxfmt
 | markdown エディタを TipTap にするか Milkdown にするか | Phase 3 開始時 |
 | Phase 5(Vectorize 意味検索)の要否 | Phase 1 を使ってから |
 | Phase 4 で SSR 純度と仮想化のどちらを取るか | Phase 4 設計時 |
-| `packages/api` を独立 Worker として切り出す時期 | スクリプトサイズ上限に当たったとき、または Phase 6(遅くともここで分割は発生する) |
+| `packages/api` を独立 Worker として切り出す時期 | スクリプトサイズ上限に当たったとき、または Phase 6(遅くともここで分割は発生する)。**下記の受け入れ基準を必ず満たすこと** |
+
+### `packages/api` 切り出し時の受け入れ基準(必須)
+
+Phase 0 の Task 7 で判明した構造的リスクに対する対処である。**この節を読まずに分割してはならない。**
+
+`identityMiddleware` は `Cf-Access-Jwt-Assertion` のペイロードを**署名検証なしに信頼する。** 検証は上流の `@hono/cloudflare-access` が行う設計であり、これは重複を避けるための意図的な分業である。単一 Worker の現状では `apps/web/src/worker.ts` が唯一の配線経路で、Access 検証と Identity 正規化が同じ `IDENTITY_PROVIDER` の値で歩調を合わせているため安全が成立している。
+
+**この安全性は分割によって静かに失われる。** 分割後の `packages/api` 側エントリポイントが Access 検証を先に走らせずに `identityMiddleware` をマウントすれば、そのヘッダを立てた任意の呼び出し元から JWT ペイロードが無検証で信頼される。
+
+現在この誤用を防いでいるのは `.oxlintrc.json` の `no-restricted-imports`(`@r2-drive/api` の値 import を `worker.ts` に限定)だが、**このガードは分割を生き延びない** — 分割後の `packages/api/src/worker.ts` は `./identity/middleware` を相対パスで import するため、パッケージ指定子に対する制限は効かない。
+
+したがって切り出しタスクは次の 2 点を満たすこと。
+
+1. **`packages/api` は「Access 署名検証 + Identity 正規化」を分離不能な 1 つの合成ミドルウェアとして公開し、`identityMiddleware` を単体で外に出さない。** 順序を「覚えておく」ものから「偽造不能」なものにする
+2. **`IDENTITY_PROVIDER` の絞り込み型(`'access' | 'static'`)を `apps/web/src/env.ts` から `packages/api` 側に移す。** `packages/api` からは `worker-configuration.d.ts` の `string` としてしか見えないため、移設しないと Task 2 が入れた `switch` + `never` による網羅チェック(fail-closed の担保)が分割時に失われる
 | エディタを `packages/editor` に切り出すか | Phase 3 設計時 |
 | `ObjectHook` に `hookable` を使うか自作するか | Phase 1 設計時 |
 | `typescript-project-setup` スキルの `react` variant をどう埋めるか | Phase 0 のスキャフォールド時 |
