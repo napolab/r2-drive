@@ -15,41 +15,52 @@ export const listRoot = css({
   borderStyle: 'solid',
   borderColor: 'border.subtle',
   bg: 'bg.canvas',
+  '&[data-drop-target]': { borderColor: 'accent.solid', bg: 'bg.subtle' },
 });
 
 // 状態は data 属性で公開し、CSS セレクタで当てる。条件付き className は書かない。
 // react-aria が data-hovered / data-selected / data-focus-visible を自動で付ける。
-export const row = css({
+export const tile = css({
   display: 'grid',
-  gridTemplateColumns: 'auto 1fr auto auto',
-  alignItems: 'center',
-  columnGap: 'element',
-  // ListLayout の rowSize と同じ値。index.tsx が token('sizes.targetComfortable') から引く。
-  h: 'targetComfortable',
-  px: 'element',
+  // preview の残り 1fr は、168px 幅から padding を引いた content 幅と一致する。
+  // その下を 48px(名前 2 行) + 24px(meta) に固定し、全 tile の高さを揃える。
+  gridTemplateRows: '[minmax(0, 1fr) var(--sizes-file-name-area) var(--sizes-target-min)]',
+  boxSizing: 'border-box',
+  w: 'fileTileWidth',
+  h: 'fileTileHeight',
+  p: 'element',
   fontSize: 'sm',
   fontWeight: 'normal',
   lineHeight: 'snug',
   cursor: 'default',
-  // 行の種別も状態と同じく data 属性で公開し、CSS 側で当てる。
-  // 潜れる行(フォルダ)を字面で見分けられるようにする。
+  overflow: 'hidden',
+  borderRadius: 'none',
+  // tile の種別も状態と同じく data 属性で公開し、CSS 側で当てる。
+  // 潜れる tile(フォルダ)を字面で見分けられるようにする。
   '&[data-kind="folder"]': { fontWeight: 'medium' },
-  // 行と行の仕切り。行は文字と背景で存在が分かるので、この線は装飾(WCAG 1.4.11 の対象外)。
-  borderBottomWidth: 'hairline',
-  borderBottomStyle: 'solid',
-  borderBottomColor: 'border.subtle',
-  // 左辺の帯。「選択されている」ことをこの線だけが示すので機能側の色を使う。
-  // 既定は装飾色、選択時だけ accent.solid(bg.canvas に対して 3:1 以上を tokens.test.ts が強制)。
-  borderLeftWidth: 'default',
-  borderLeftStyle: 'solid',
-  borderLeftColor: 'border.subtle',
+  // 選択可能な tile は、この境界線が形を伝えるので 3:1 を強制した token を使う。
+  borderWidth: 'hairline',
+  borderStyle: 'solid',
+  borderColor: 'border.interactive',
+  bg: 'bg.canvas',
   '&[data-hovered]': { bg: 'bg.subtle' },
-  '&[data-selected]': { bg: 'bg.emphasis', borderLeftColor: 'accent.solid' },
+  '&[data-selected]': { bg: 'bg.emphasis', borderColor: 'accent.solid' },
   // 自前で outline を書かない。panda.config.ts の layerStyles.focusRing を使う。
-  // ただし offset だけは内側に倒す: focusRing の既定 +3px は行の外に出るため、
-  // overflow: auto のスクロールコンテナに切られて「行の下に破線が 1 本走る」ように
+  // ただし offset だけは内側に倒す: focusRing の既定 +3px は tile の外に出るため、
+  // overflow: auto のスクロールコンテナに切られて「tile の下に破線が 1 本走る」ように
   // 見える(開発サーバーで確認)。色・線種・太さは layerStyle のまま。
   '&[data-focus-visible]': { layerStyle: 'focusRing', outlineOffset: '[-3px]' },
+});
+
+// GridListItem が定義した 3 行を子へそのまま渡す。preview / name / meta が
+// 内容量に左右されず完全に同じ track を使うための user-required subgrid。
+export const tileGrid = css({
+  display: 'grid',
+  gridColumn: '[1]',
+  gridRow: '[1 / -1]',
+  gridTemplateRows: 'subgrid',
+  minW: '[0]',
+  minH: '[0]',
 });
 
 // 次ページ取得のセンチネル。行ではないので罫線を持たせない。
@@ -62,28 +73,50 @@ export const loadMore = css({
   fontSize: 'xs',
 });
 
-export const icon = css({
-  display: 'inline-flex',
-  alignItems: 'center',
-  justifyContent: 'center',
-  w: 'targetMin',
+export const previewRoot = css({
+  display: 'grid',
+  placeItems: 'center',
+  minW: '[0]',
+  minH: '[0]',
+  aspectRatio: '1',
+  overflow: 'hidden',
+  bg: 'bg.muted',
   color: 'fg.muted',
-  fontFamily: 'mono',
+  borderBottomWidth: 'hairline',
+  borderBottomStyle: 'solid',
+  borderBottomColor: 'border.subtle',
+});
+
+export const nameRoot = css({
+  display: 'grid',
+  alignItems: 'center',
+  minW: '[0]',
+  px: 'inline',
+  borderBottomWidth: 'hairline',
+  borderBottomStyle: 'solid',
+  borderBottomColor: 'border.subtle',
 });
 
 export const name = css({
   overflow: 'hidden',
   textOverflow: 'ellipsis',
-  whiteSpace: 'nowrap',
+  lineClamp: 2,
   color: 'fg.default',
 });
 
-// 「全部に、名前がついてしまう」— サイズと更新日時はシステム注釈そのもの。
-// 等幅 + tabular-nums で行が変わっても桁が揃う。
-export const meta = css({
+// 「全部に、名前がついてしまう」— サイズと file type はシステム注釈そのもの。
+// 等幅 + tabular-nums で tile が変わっても桁が揃う。
+export const metaRoot = css({
+  display: 'flex',
+  alignItems: 'center',
+  justifyContent: 'space-between',
+  gap: 'inline',
+  minW: '[0]',
+  px: 'inline',
+  overflow: 'hidden',
   color: 'fg.muted',
   fontFamily: 'mono',
-  fontSize: 'xs',
+  fontSize: '2xs',
   fontVariantNumeric: 'tabular-nums',
   whiteSpace: 'nowrap',
 });
