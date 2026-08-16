@@ -1,8 +1,11 @@
 # タスク
 
 次に何をやるかの一覧。設計の根拠は `docs/superpowers/specs/2026-08-14-r2-drive-design.md`(以下 spec)にあり、
-ここはそこから**実行できる粒度**に落としたものだけを置く。判断の経緯は
-`.superpowers/sdd/2026-08-14-r2-drive-phase-0/progress.md`(未追跡)に残っている。
+ここはそこから**実行できる粒度**に落としたものだけを置く。
+
+なぜ今その設計になっているか(タスクごとの裁定、レビューで見つかった実害、見送った判断とその理由)は
+[`docs/superpowers/progress/2026-08-14-r2-drive-phase-0.md`](./superpowers/progress/2026-08-14-r2-drive-phase-0.md) にある。
+下の「持ち越した Minor」は、そこから未着手のものを抜き出したものである。
 
 ## 現在地
 
