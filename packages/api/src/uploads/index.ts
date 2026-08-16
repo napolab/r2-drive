@@ -1,4 +1,4 @@
-import { UploadSessionError } from '@r2-drive/core';
+import { R2OperationError, UploadSessionError } from '@r2-drive/core';
 import { zValidator } from '@hono/zod-validator';
 import { Hono } from 'hono';
 import { fromPromise } from 'neverthrow';
@@ -19,6 +19,20 @@ const completeBody = z.object({
 const keyQuery = z.object({ key: z.string().min(1) });
 
 export const uploads = new Hono<HonoEnv>()
+  .put('/:bucketId/single', zValidator('query', keyQuery), async (c) => {
+    const body = c.req.raw.body ?? new Uint8Array(0);
+    const requestContentType = c.req.header('content-type');
+    const contentType = requestContentType === undefined || requestContentType === '' ? 'application/octet-stream' : requestContentType;
+
+    return resolveBucket(c.env, c.req.param('bucketId')).match(
+      async (bucket) =>
+        fromPromise(bucket.put(c.req.valid('query').key, body, { httpMetadata: { contentType } }), (cause) => new R2OperationError('single upload failed', { cause })).match(
+          (object) => c.json({ key: object.key, etag: object.httpEtag }, 200, { etag: object.httpEtag }),
+          (error) => toErrorResponse(c, error),
+        ),
+      async (error) => toErrorResponse(c, error),
+    );
+  })
   .post('/:bucketId', zValidator('json', createBody), async (c) => {
     const { key, contentType } = c.req.valid('json');
 

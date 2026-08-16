@@ -12,6 +12,37 @@ const create = async (key: string) =>
     key: string;
   };
 
+describe('single upload', () => {
+  it('raw body と content type を保存して ETag を返す', async () => {
+    const body = new TextEncoder().encode('hello from single upload');
+
+    const res = await api.request('/uploads/photos/single?key=notes%2Fhello.txt', { method: 'PUT', body, headers: { 'content-type': 'text/plain; charset=utf-8' } }, env);
+
+    expect(res.status).toBe(200);
+    const stored = await env.BUCKET_PHOTOS.get('notes/hello.txt');
+    expect(await stored?.text()).toBe('hello from single upload');
+    expect(stored?.httpMetadata?.contentType).toBe('text/plain; charset=utf-8');
+    expect(res.headers.get('etag')).toBe(stored?.httpEtag);
+  });
+
+  it('zero-byte body と空の content type を明示的な fallback で保存する', async () => {
+    const res = await api.request('/uploads/photos/single?key=empty.bin', { method: 'PUT' }, env);
+
+    expect(res.status).toBe(200);
+    const stored = await env.BUCKET_PHOTOS.get('empty.bin');
+    expect(stored?.size).toBe(0);
+    expect(stored?.httpMetadata?.contentType).toBe('application/octet-stream');
+    expect(res.headers.get('etag')).toBe(stored?.httpEtag);
+  });
+
+  it('未知の bucket は 404 と BucketNotFoundError を返す', async () => {
+    const res = await api.request('/uploads/unknown/single?key=file.bin', { method: 'PUT', body: new Uint8Array([1]) }, env);
+
+    expect(res.status).toBe(404);
+    expect(await res.json()).toMatchObject({ name: 'BucketNotFoundError' });
+  });
+});
+
 describe('multipart upload', () => {
   it('create → part ×2 → complete でオブジェクトができる', async () => {
     const { uploadId, key } = await create('big.bin');
