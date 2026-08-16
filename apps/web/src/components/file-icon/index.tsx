@@ -1,8 +1,10 @@
+import { token } from '@styled/tokens';
+
 import * as s from './styles.css';
 
-type Glyph = 'doc' | 'image' | 'video' | 'audio' | 'blank';
+export type FileIconGlyph = 'doc' | 'image' | 'video' | 'audio' | 'blank' | 'folder';
 
-type Props = { readonly size: number; readonly glyph: Glyph };
+type Props = { readonly size: number; readonly glyph: FileIconGlyph };
 
 const PATHS = {
   doc: 'M6 2h8l4 4v16H6z',
@@ -10,7 +12,10 @@ const PATHS = {
   video: 'M4 5h16v14H4zm6 3l6 4-6 4z',
   audio: 'M9 18V6l10-2v12M9 18a3 3 0 1 1-6 0 3 3 0 0 1 6 0z',
   blank: 'M6 2h12v20H6z',
-} satisfies Record<Glyph, string>;
+  folder: 'M3 6h7l2 3h9v11H3z',
+} satisfies Record<FileIconGlyph, string>;
+
+const PREVIEW_ICON_SIZE = parseInt(token('sizes.filePreviewIcon'), 10);
 
 export const FileIcon = ({ size, glyph }: Props) => (
   // fill="none" / stroke="currentColor" だけを SVG のプレゼンテーション属性として
@@ -21,3 +26,5 @@ export const FileIcon = ({ size, glyph }: Props) => (
     <path d={PATHS[glyph]} />
   </svg>
 );
+
+export const FilePreviewIcon = ({ glyph }: { readonly glyph: FileIconGlyph }) => <FileIcon size={PREVIEW_ICON_SIZE} glyph={glyph} />;
