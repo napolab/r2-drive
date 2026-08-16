@@ -12,6 +12,11 @@ styled-system/
 .dev.vars
 !.dev.vars.example
 
+# 環境固有の値(Access team / AUD / R2 バケット名)を持つので追跡しない。
+# `cp apps/web/wrangler.jsonc.example apps/web/wrangler.jsonc` して使う。
+wrangler.jsonc
+!wrangler.jsonc.example
+
 .DS_Store
 .claude/worktrees/
 .claude/settings.local.json
