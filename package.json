@@ -11,7 +11,9 @@
     "lint:oxfmt": "oxfmt --check .",
     "lint:oxlint": "oxlint .",
     "typecheck": "tsgo --noEmit -p tsconfig.base.json",
-    "test": "vitest run"
+    "test": "vitest run",
+    "test:browser:install": "pnpm --filter web exec playwright install chromium",
+    "test:browser": "vitest run --config apps/web/vitest.browser.config.ts"
   },
   "devDependencies": {
     "@types/node": "^22.20.1",
