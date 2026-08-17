@@ -1,10 +1,11 @@
 import { zValidator } from '@hono/zod-validator';
-import { ObjectNotFoundError } from '@r2-drive/core';
+import { ObjectNotFoundError, R2OperationError } from '@r2-drive/core';
 import { Hono } from 'hono';
+import { ResultAsync } from 'neverthrow';
 import { z } from 'zod';
 
 import { toErrorResponse } from '../errors/to-error-response';
-import { indexRemove } from '../object-index/registry';
+import { indexRemove, resolveObjectIndex } from '../object-index/registry';
 import { deleteObject } from '../r2/delete';
 import { resolveObjectSource } from '../plugins/object-source/registry';
 import { getObject } from '../r2/get';
@@ -12,8 +13,14 @@ import { parseRangeHeader, resolveContentRange } from '../r2/range';
 import { bucketDescriptors, resolveBucket } from '../r2/registry';
 
 import type { HonoEnv } from '../env';
+import type { DriveError, ObjectPage } from '@r2-drive/core';
 
 const listQuery = z.object({ prefix: z.string().default(''), cursor: z.string().optional() });
+const searchQuery = z.object({ q: z.string().min(1), cursor: z.string().optional() });
+
+// 検索結果は一覧より小さいページで返す。全件を舐める用途ではないため。
+// INDEX_PAGE_SIZE(一覧用、1000)とは目的が違うので流用しない。
+const SEARCH_PAGE_SIZE = 100;
 
 // content-addressed URL のバージョン。クライアントは ObjectDescriptor.etag(= httpEtag、
 // 引用符付き)をそのまま載せるので、ここでも引用符付きの文字列として素通しする。
@@ -40,6 +47,37 @@ export const buckets = new Hono<HonoEnv>()
         ),
       (input) => toErrorResponse(c, new Error(`no object source for bucket: ${input.bucketId}`)),
     );
+  })
+  // 索引を直接読む唯一の GET エンドポイント。indexed フラグでは分岐しない
+  // (indexed: false のバケットでも Task 8 により索引には行が書かれているため、
+  // 検索は先に索引を使える。切り替え前の動作確認手段としても価値がある)。
+  // ただし、バックフィル前は既存オブジェクトが索引に無いため検索結果は不完全になりうる。
+  //
+  // 'search' は 2 番目のセグメントが literal なので、'/:bucketId/objects' や
+  // '/:bucketId/content/:path{.+}' とは衝突しない。一覧系の GET とまとめて扱う意味で
+  // '/:bucketId/objects' の直後に置く。
+  //
+  // Ruling 17(実測日 2026-08-17、test/search.integration.test.ts で固定): FTS5 の
+  // 既定 tokenizer(unicode61)は連続する CJK 文字列全体を 1 トークン化し、単語分割
+  // しない。そのため日本語クエリは、連続する非 ASCII ランの「先頭一致」しか引けない
+  // (例: 「休暇の写真.jpg」に対し「休暇の写真」「休暇」はヒットするが、「写真」(末尾)
+  // 「暇の写」(中間)はヒットしない)。tokenize = 'trigram' に変えても解決しない
+  // (FTS5 の trigram は 3 文字未満のクエリにマッチしないため、「写真」のような
+  // 2 文字の日本語クエリはそもそも構成できず引けない)。この実測値が spec の
+  // 「Phase 5(Vectorize 意味検索)の要否は FTS5 を実際に使ってから判断する」の
+  // 判断材料である。
+  .get('/:bucketId/search', zValidator('query', searchQuery), async (c) => {
+    const { q, cursor } = c.req.valid('query');
+    const bucketId = c.req.param('bucketId');
+
+    return resolveObjectIndex(c.env, bucketId)
+      .asyncAndThen((stub) =>
+        ResultAsync.fromPromise<ObjectPage, DriveError>(stub.search({ bucketId, query: q, cursor, limit: SEARCH_PAGE_SIZE }), (cause) => new R2OperationError(`index search failed: ${q}`, { cause })),
+      )
+      .match(
+        (page) => c.json(page, 200),
+        (error) => toErrorResponse(c, error),
+      );
   })
   .get('/:bucketId/content/:path{.+}', zValidator('query', contentQuery), async (c) => {
     const key = c.req.param('path');
