@@ -1,4 +1,4 @@
-import { and, asc, count as countRows, eq, gt } from 'drizzle-orm';
+import { and, asc, count as countRows, eq, gt, ne } from 'drizzle-orm';
 
 import { BucketMismatchError } from './errors';
 import { keyPartsOf } from './key-parts/index';
@@ -97,8 +97,17 @@ export class ObjectIndex extends SqliteStore {
 
   // objects の読み取りは Drizzle で書く(Task 4 で確立した方針)。limit + 1 件取って、
   // 余ったら truncated と判定する(COUNT を撃たずに済む)。
+  //
+  // key === prefix の行(末尾 '/' の 0 バイトフォルダマーカー。R2 に実在し、多くの
+  // ツールが作る)は除外する。packages/api/src/r2/list.ts の listObjects が同じ理由
+  // (「prefix そのものを表す 0 バイトのマーカーは一覧に出さない」)で
+  // `.filter((object) => object.key !== input.prefix)` しているのと同じ挙動に揃える
+  // (Ruling 14)。揃えないと indexed の有無で一覧の中身が変わり、名前が空のエントリが出る。
   list(input: IndexListInput): ObjectPage {
-    const where = input.cursor === undefined ? eq(objects.parentPrefix, input.prefix) : and(eq(objects.parentPrefix, input.prefix), gt(objects.key, input.cursor));
+    const where =
+      input.cursor === undefined
+        ? and(eq(objects.parentPrefix, input.prefix), ne(objects.key, input.prefix))
+        : and(eq(objects.parentPrefix, input.prefix), ne(objects.key, input.prefix), gt(objects.key, input.cursor));
 
     const rows = this.db
       .select()
@@ -146,6 +155,11 @@ export class ObjectIndex extends SqliteStore {
   // 相関 EXISTS + 文字列演算は Drizzle のクエリビルダで素直に表現できないので
   // raw sql.exec で書く(objects/prefixes 単体の読み取りは list() 本体・count() で
   // Drizzle を使っている)。
+  //
+  // EXISTS の対象からも objects.key = prefixes.prefix(0 バイトのフォルダマーカー自身)
+  // を除く。list() 側と同じ Ruling 14 の対応で、除かないと「自分のマーカーだけを含む
+  // フォルダ」が非空と誤判定され、開くと空になる(Ruling 2 で潰した幽霊フォルダと
+  // 同種の乖離)。list() 本体の `ne(objects.key, input.prefix)` と対にして直すこと。
   #foldersOf(bucketId: string, prefix: string): readonly FolderDescriptor[] {
     return this.ctx.storage.sql
       .exec<{ prefix: string }>(
@@ -155,6 +169,7 @@ export class ObjectIndex extends SqliteStore {
              SELECT 1 FROM objects
              WHERE objects.key >= prefixes.prefix
                AND objects.key < substr(prefixes.prefix, 1, length(prefixes.prefix) - 1) || '0'
+               AND objects.key <> prefixes.prefix
            )
          ORDER BY prefix`,
         prefix,

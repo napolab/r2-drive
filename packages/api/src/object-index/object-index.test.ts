@@ -239,6 +239,39 @@ describe('ObjectIndex の一覧', () => {
 
     const second = await stub.list({ bucketId: 'photos', prefix: 'a/', cursor: first.next.cursor, limit: 1 });
     expect(second.folders).toEqual([]);
+    // 2 ページ目はちょうど limit(1) 件しか残っていない(a/2.txt のみ)。ここで
+    // rows.length(limit + 1 件フェッチした実際の件数)が limit を超えないケースを
+    // 踏む。`rows.length > input.limit` を `>=` に変異させても、他のテストは
+    // 「明確に超える/明確に下回る」件数しか使っていないため落ちない。
+    // ここでちょうど limit 件のケースを固定して穴をふさぐ。
+    expect(second.next).toEqual({ kind: 'end' });
+  });
+
+  // I1: 「limit + 1 件フェッチしたが実際は limit 件しかなかった」経路を単独で固定する。
+  // `rows.length > input.limit` を `>=` に変異させると、この 3 件 ちょうど limit=3 の
+  // ケースで next が誤って more になり、この行が落ちる。
+  it('ちょうど limit 件ある prefix で next が end になる', async () => {
+    const stub = stubFor('list-exact-limit');
+    await stub.upsert(descriptorOf('a/1.txt'));
+    await stub.upsert(descriptorOf('a/2.txt'));
+    await stub.upsert(descriptorOf('a/3.txt'));
+
+    const page = await stub.list({ bucketId: 'photos', prefix: 'a/', cursor: undefined, limit: 3 });
+
+    expect(page.objects.map((o) => o.key)).toEqual(['a/1.txt', 'a/2.txt', 'a/3.txt']);
+    expect(page.next).toEqual({ kind: 'end' });
+  });
+
+  // Minor: 0 件ページ。何も upsert していない prefix を引いても objects / folders は
+  // 空配列で、next は end であることを固定する。
+  it('何もない prefix を引くと空ページが返る', async () => {
+    const stub = stubFor('list-empty');
+
+    const page = await stub.list({ bucketId: 'photos', prefix: 'nothing/', cursor: undefined, limit: 10 });
+
+    expect(page.objects).toEqual([]);
+    expect(page.folders).toEqual([]);
+    expect(page.next).toEqual({ kind: 'end' });
   });
 
   it('返す ObjectDescriptor は渡した bucketId を持つ', async () => {
@@ -272,5 +305,32 @@ describe('ObjectIndex の一覧', () => {
     const page = await stub.list({ bucketId: 'photos', prefix: 'a/', cursor: undefined, limit: 10 });
 
     expect(page.folders.map((f) => f.prefix)).toContain('a/b/');
+  });
+
+  // Ruling 14: R2 には末尾 '/' の 0 バイトオブジェクト(フォルダマーカー)が実在し、
+  // 多くのツールが作る。packages/api/src/r2/list.ts の listObjects は
+  // `.filter((object) => object.key !== input.prefix)` で prefix そのものを表す
+  // マーカーを除外している(同ファイルのコメント参照)。索引側もこの挙動に揃える。
+  // 揃えないと indexed の有無で一覧の中身が変わり、名前が空のエントリが出る。
+  it('prefix 自身を表すマーカーは objects に出ない', async () => {
+    const stub = stubFor('list-marker-excluded');
+    await stub.upsert(descriptorOf('a/marker.txt'));
+    await stub.upsert(descriptorOf('a/'));
+
+    const page = await stub.list({ bucketId: 'photos', prefix: 'a/', cursor: undefined, limit: 10 });
+
+    expect(page.objects.map((o) => o.key)).toEqual(['a/marker.txt']);
+  });
+
+  // 同じ Ruling 14 を #foldersOf の EXISTS 側でも固定する。除かないと「自分の
+  // マーカーだけを含むフォルダ」が非空と誤判定され、開くと空になる
+  // (Ruling 2 で潰した幽霊フォルダと同種の乖離)。
+  it('マーカーだけのフォルダは folders に出ない', async () => {
+    const stub = stubFor('list-marker-only-folder');
+    await stub.upsert(descriptorOf('a/b/'));
+
+    const page = await stub.list({ bucketId: 'photos', prefix: 'a/', cursor: undefined, limit: 10 });
+
+    expect(page.folders.map((f) => f.prefix)).not.toContain('a/b/');
   });
 });
