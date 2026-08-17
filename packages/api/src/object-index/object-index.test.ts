@@ -334,3 +334,115 @@ describe('ObjectIndex の一覧', () => {
     expect(page.folders.map((f) => f.prefix)).not.toContain('a/b/');
   });
 });
+
+describe('ObjectIndex の検索', () => {
+  it('ファイル名の部分一致で引ける', async () => {
+    const stub = stubFor('search-basic');
+    await stub.upsert(descriptorOf('a/vacation-2026.jpg'));
+    await stub.upsert(descriptorOf('a/invoice-2026.pdf'));
+
+    const page = await stub.search({ bucketId: 'photos', query: 'vacation', cursor: undefined, limit: 10 });
+
+    expect(page.objects.map((o) => o.key)).toEqual(['a/vacation-2026.jpg']);
+    expect(page.folders).toEqual([]);
+  });
+
+  it('remove した行は検索結果から消える', async () => {
+    const stub = stubFor('search-after-remove');
+    await stub.upsert(descriptorOf('a/vacation.jpg'));
+    await stub.remove('a/vacation.jpg');
+
+    const page = await stub.search({ bucketId: 'photos', query: 'vacation', cursor: undefined, limit: 10 });
+
+    expect(page.objects).toEqual([]);
+  });
+
+  it('upsert で名前が変わると新しい名前で引けて古い名前では引けない', async () => {
+    const stub = stubFor('search-after-rename');
+    await stub.upsert(descriptorOf('a/oldname.txt'));
+    await stub.upsert(descriptorOf('a/oldname.txt', { name: 'ignored' }));
+    await stub.remove('a/oldname.txt');
+    await stub.upsert(descriptorOf('a/newname.txt'));
+
+    await expect(stub.search({ bucketId: 'photos', query: 'oldname', cursor: undefined, limit: 10 })).resolves.toMatchObject({ objects: [] });
+    const found = await stub.search({ bucketId: 'photos', query: 'newname', cursor: undefined, limit: 10 });
+    expect(found.objects.map((o) => o.key)).toEqual(['a/newname.txt']);
+  });
+
+  it('該当が無ければ空で end を返す', async () => {
+    const stub = stubFor('search-empty');
+    await stub.upsert(descriptorOf('a/1.txt'));
+
+    const page = await stub.search({ bucketId: 'photos', query: 'zzzz', cursor: undefined, limit: 10 });
+
+    expect(page.objects).toEqual([]);
+    expect(page.next).toEqual({ kind: 'end' });
+  });
+
+  // 順序は rank(一致度)ではなく key 昇順で決定的に返ることを固定する。insert 順を
+  // わざと key の昇順と食い違わせている。rank 順(ORDER BY rank)に変異すると、
+  // 一致度が同点の行は内部的に rowid(≒ insert 順)で並ぶため 'c', 'a', 'b' の順で
+  // 返ってしまい、この行が落ちる。
+  it('検索結果は insert 順ではなく key 昇順で返る', async () => {
+    const stub = stubFor('search-order-by-key');
+    await stub.upsert(descriptorOf('a/report-c.txt'));
+    await stub.upsert(descriptorOf('a/report-a.txt'));
+    await stub.upsert(descriptorOf('a/report-b.txt'));
+
+    const page = await stub.search({ bucketId: 'photos', query: 'report', cursor: undefined, limit: 10 });
+
+    expect(page.objects.map((o) => o.key)).toEqual(['a/report-a.txt', 'a/report-b.txt', 'a/report-c.txt']);
+  });
+
+  it('limit を超えると cursor で続きが取れる', async () => {
+    const stub = stubFor('search-cursor');
+    await stub.upsert(descriptorOf('a/report-1.txt'));
+    await stub.upsert(descriptorOf('a/report-2.txt'));
+    await stub.upsert(descriptorOf('a/report-3.txt'));
+
+    const first = await stub.search({ bucketId: 'photos', query: 'report', cursor: undefined, limit: 2 });
+    expect(first.objects).toHaveLength(2);
+    if (first.next.kind !== 'more') throw new Error('next が more にならなかった');
+
+    const second = await stub.search({ bucketId: 'photos', query: 'report', cursor: first.next.cursor, limit: 2 });
+    expect(second.objects).toHaveLength(1);
+  });
+
+  // I1 と同じ穴を search 側でも塞ぐ(Task 5 で見つかった off-by-one)。
+  // 「limit + 1 件フェッチしたが実際は limit 件しかなかった」経路を単独で固定する。
+  // `rows.length > input.limit` を `>=` に変異させると、この 2 件 ちょうど
+  // limit=2 のケースで next が誤って more になり、この行が落ちる。
+  it('ちょうど limit 件ヒットすると next が end になる', async () => {
+    const stub = stubFor('search-exact-limit');
+    await stub.upsert(descriptorOf('a/report-1.txt'));
+    await stub.upsert(descriptorOf('a/report-2.txt'));
+
+    const page = await stub.search({ bucketId: 'photos', query: 'report', cursor: undefined, limit: 2 });
+
+    expect(page.objects.map((o) => o.key)).toEqual(['a/report-1.txt', 'a/report-2.txt']);
+    expect(page.next).toEqual({ kind: 'end' });
+  });
+
+  it('FTS5 の演算子を含む入力で例外を投げない', async () => {
+    const stub = stubFor('search-hostile');
+    await stub.upsert(descriptorOf('a/1.txt'));
+
+    await expect(stub.search({ bucketId: 'photos', query: 'a OR "b', cursor: undefined, limit: 10 })).resolves.toMatchObject({ folders: [] });
+  });
+
+  // Ruling 15: search も list と同じく、prefix そのものを表す 0 バイトのフォルダ
+  // マーカー(末尾 '/' のキー)を除外する。マーカーは name が空文字だが、key に
+  // 含まれる文字列で FTS がマッチしうる(例: key 'docs/' は 'docs' で前方一致する)。
+  // 除外しないと「検索では見えるが一覧では開けない」非対称が生まれる。
+  // 判定はマーカーの定義そのもの(key が末尾 '/' で終わる)に置く。name が空文字の
+  // 行を除外する実装だと、name が空になる別の条件が将来増えたときに崩れる。
+  it('末尾が / のフォルダマーカーは検索結果に出ない', async () => {
+    const stub = stubFor('search-marker-excluded');
+    await stub.upsert(descriptorOf('docs/'));
+    await stub.upsert(descriptorOf('docs/design.md'));
+
+    const page = await stub.search({ bucketId: 'photos', query: 'docs', cursor: undefined, limit: 10 });
+
+    expect(page.objects.map((o) => o.key)).toEqual(['docs/design.md']);
+  });
+});

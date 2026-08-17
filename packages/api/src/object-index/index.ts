@@ -29,6 +29,25 @@ export type IndexListInput = {
   readonly limit: number;
 };
 
+// bucketId は list と同じく guard(meta.bucket_id)ではなく引数が出典(Ruling 11)。
+export type IndexSearchInput = {
+  readonly bucketId: string;
+  readonly query: string;
+  readonly cursor: string | undefined;
+  readonly limit: number;
+};
+
+// objects_fts と objects を JOIN した raw sql.exec の行形。列名は schema.ts の
+// 手書き DDL(snake_case)に従う。Drizzle の $inferSelect(camelCase)とは別物。
+type ObjectRow = {
+  readonly key: string;
+  readonly name: string;
+  readonly content_type: string;
+  readonly size: number;
+  readonly uploaded_at: string;
+  readonly etag: string;
+};
+
 export class ObjectIndex extends SqliteStore {
   // objects / prefixes / meta は Drizzle で、objects_fts(FTS5 の仮想テーブル。Drizzle では
   // 表現できない)は raw sql.exec で書く。両方を db.transaction() の中に置くことで
@@ -176,6 +195,74 @@ export class ObjectIndex extends SqliteStore {
       )
       .toArray()
       .map((row) => ({ bucketId, prefix: row.prefix, name: keyPartsOf(row.prefix.slice(0, -1)).name }));
+  }
+
+  // FTS5 のクエリ構文をユーザー入力に露出させない。二重引用符を潰してフレーズとして
+  // 囲み、末尾に * を付けて前方一致にする。こうしないと 'a OR "b' のような入力が
+  // 構文エラーで例外になる(消費エッジで拾わず DO の RPC 越しに投げてしまう)。
+  #ftsQueryOf(raw: string): string {
+    const sanitized = raw.replaceAll('"', ' ').trim();
+
+    return sanitized === '' ? '""' : `"${sanitized}"*`;
+  }
+
+  // objects_fts(FTS5 の仮想テーブル)は Drizzle で表現できないので raw sql.exec で
+  // 書く(list() 本体は objects 単体の読み取りなので Drizzle、こちらは
+  // objects_fts と objects の JOIN なので raw、という使い分けは #foldersOf と同じ)。
+  //
+  // 順序は key 昇順にする。rank(一致度)順にすると同じ query でもページ間で順序が
+  // 安定せず、cursor の意味が壊れる(「最後に返した key より後ろ」が成り立たなくなり、
+  // 取りこぼしや重複が起きる)。R2 の cursor と同じ「最後に返した key」という契約を
+  // 守るため、rank ではなく key で決定的に並べる。
+  //
+  // key === prefix の 0 バイトフォルダマーカー(末尾 '/' のキー)は list() と同じ
+  // 理由(Ruling 14 / Ruling 15)で除外する。マーカーは name が空文字だが、name が
+  // 空になる条件は他にもありうるので、判定はマーカーの定義そのもの(key が末尾 '/' で
+  // 終わる)に置く。除外しないと「一覧では見えないが検索では見える」非対称が生まれ、
+  // 検索結果から開けないオブジェクトが出る。
+  search(input: IndexSearchInput): ObjectPage {
+    const sql = this.ctx.storage.sql;
+    const match = this.#ftsQueryOf(input.query);
+    const rows =
+      input.cursor === undefined
+        ? sql
+            .exec<ObjectRow>(
+              `SELECT o.* FROM objects_fts f JOIN objects o ON o.key = f.key
+               WHERE f.objects_fts MATCH ? AND o.key NOT LIKE '%/'
+               ORDER BY o.key LIMIT ?`,
+              match,
+              input.limit + 1,
+            )
+            .toArray()
+        : sql
+            .exec<ObjectRow>(
+              `SELECT o.* FROM objects_fts f JOIN objects o ON o.key = f.key
+               WHERE f.objects_fts MATCH ? AND o.key NOT LIKE '%/' AND o.key > ?
+               ORDER BY o.key LIMIT ?`,
+              match,
+              input.cursor,
+              input.limit + 1,
+            )
+            .toArray();
+
+    const page = rows.slice(0, input.limit);
+    const last = page[page.length - 1];
+    const next: NextPage = rows.length > input.limit && last !== undefined ? { kind: 'more', cursor: last.key } : { kind: 'end' };
+
+    return {
+      // 検索結果に階層構造は無い。
+      folders: [],
+      objects: page.map((row) => ({
+        bucketId: input.bucketId,
+        key: row.key,
+        name: row.name,
+        contentType: row.content_type,
+        size: row.size,
+        uploadedAt: row.uploaded_at,
+        etag: row.etag,
+      })),
+      next,
+    };
   }
 
   // 1 バケット = 1 DO は idFromName(bucketId) を呼ぶ側の不変条件にすぎず、DO 自身は
