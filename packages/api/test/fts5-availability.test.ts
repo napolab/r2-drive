@@ -7,5 +7,5 @@ import { objectIndexNamespace } from './object-index-namespace';
 it('DO の SQLite で FTS5 の仮想テーブルが作れて MATCH が引ける', async () => {
   const stub = objectIndexNamespace.get(objectIndexNamespace.idFromName('fts-probe'));
 
-  await expect(stub.probeFts()).resolves.toEqual(['休暇の写真 vacation-2026.jpg']);
+  await expect(stub.debugProbeFts()).resolves.toEqual(['休暇の写真 vacation-2026.jpg']);
 });
