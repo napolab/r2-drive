@@ -14,6 +14,22 @@ export class ObjectIndex extends DurableObject<Env> {
 
     return rows.map((row) => row.name);
   }
+
+  // 1 本目は成功し 2 本目が必ず失敗する書き込みを流し、1 本目が巻き戻るかを見る。
+  // 巻き戻れば原子的、残れば原子的でない。
+  probeAtomicity(): number {
+    this.ctx.storage.sql.exec(`CREATE TABLE IF NOT EXISTS probe_a (k TEXT PRIMARY KEY)`);
+    this.ctx.storage.sql.exec(`DELETE FROM probe_a`);
+    try {
+      this.ctx.storage.sql.exec(`INSERT INTO probe_a (k) VALUES (?)`, 'first');
+      // 存在しない表への INSERT なので必ず失敗する。
+      this.ctx.storage.sql.exec(`INSERT INTO probe_missing (k) VALUES (?)`, 'second');
+    } catch {
+      // 例外は握る。ここで見たいのは probe_a の中身だけ。
+    }
+
+    return this.ctx.storage.sql.exec<{ n: number }>(`SELECT COUNT(*) AS n FROM probe_a`).one().n;
+  }
 }
 
 export default api;

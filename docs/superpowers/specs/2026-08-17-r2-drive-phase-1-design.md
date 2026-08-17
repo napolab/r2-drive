@@ -142,9 +142,12 @@ npm を調査した(2026-08-17)。
 | Kysely 本体 | 健全だが **DO 用の公式 dialect が無い**。自作は「車輪の再発明」に該当する |
 | **`drizzle-orm`** | **0.45.2 / 2026-08-12。`./durable-sqlite` `./durable-sqlite/migrator` を一次サポート** |
 
-**着手前に検証すること**(§7): Drizzle の `await db.insert(...)` を連続で呼んだとき、
+**検証済み**(§7、2026-08-17 実測): Drizzle の `await db.insert(...)` を連続で呼んだとき、
 Cloudflare が言う write coalescing(`await` を挟まない `sql.exec()` が 1 トランザクションになる)が
-保たれるか。**保たれないなら明示トランザクションで囲う。**決定 1 の利点の一部がこれに依存している。
+保たれるかを `packages/api/test/drizzle-atomicity.test.ts` で確かめた。**保たれなかった**
+(1 本目が成功し 2 本目が失敗する連続 `sql.exec` を流したところ、1 本目は巻き戻らず残った)。
+**書き込み経路は `this.ctx.storage.transactionSync()` で明示的に囲う。**決定 1(`objects` /
+`prefixes` / `objects_fts` を同一トランザクションで更新する)の前提はこれで満たす。
 
 ## 5. Durable Object のクラス構成
 
@@ -352,7 +355,7 @@ Phase 0 spec §14 の未決事項「`ObjectHook` に `hookable` を使うか自�
 | # | 検証すること | falsy だった場合 |
 |---|---|---|
 | 1 | **DO SQLite で FTS5 が使えるか。**2026-08-17 に実測、DO SQLite で FTS5 は使える(`packages/api/test/fts5-availability.test.ts`。`CREATE VIRTUAL TABLE ... USING fts5(name)` から `MATCH` クエリまで通った) | 検索の設計だけ組み直す(`name LIKE ?` か別手段)。**索引の速さは影響を受けない** |
-| 2 | **Drizzle の `await` 連鎖で write coalescing が保たれるか**(§4) | 明示トランザクションで囲う。あるいは書き込み経路だけ raw `sql.exec` にする |
+| 2 | **Drizzle の `await` 連鎖で write coalescing が保たれるか**(§4)。2026-08-17 に実測、**保たれない**(`packages/api/test/drizzle-atomicity.test.ts`。2 本目が失敗しても 1 本目は残り、行数は 1 になった) | 書き込み経路は `this.ctx.storage.transactionSync()` で明示的に囲う。raw `sql.exec` を連続で呼ぶだけでは不十分 |
 
 ## 13. 受け入れ基準
 
