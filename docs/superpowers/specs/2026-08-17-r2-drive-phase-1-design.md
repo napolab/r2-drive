@@ -351,7 +351,7 @@ Phase 0 spec §14 の未決事項「`ObjectHook` に `hookable` を使うか自�
 
 | # | 検証すること | falsy だった場合 |
 |---|---|---|
-| 1 | **DO SQLite で FTS5 が使えるか。**Cloudflare は対応拡張の一覧を D1 と DO で共有して記述しているが(`d1-do-supported-sqlite-extensions`)、DO で明示的に検証した記述は確認していない | 検索の設計だけ組み直す(`name LIKE ?` か別手段)。**索引の速さは影響を受けない** |
+| 1 | **DO SQLite で FTS5 が使えるか。**2026-08-17 に実測、DO SQLite で FTS5 は使える(`packages/api/test/fts5-availability.test.ts`。`CREATE VIRTUAL TABLE ... USING fts5(name)` から `MATCH` クエリまで通った) | 検索の設計だけ組み直す(`name LIKE ?` か別手段)。**索引の速さは影響を受けない** |
 | 2 | **Drizzle の `await` 連鎖で write coalescing が保たれるか**(§4) | 明示トランザクションで囲う。あるいは書き込み経路だけ raw `sql.exec` にする |
 
 ## 13. 受け入れ基準

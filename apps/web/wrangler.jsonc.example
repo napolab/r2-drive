@@ -26,4 +26,11 @@
     { "binding": "BUCKET_PHOTOS", "bucket_name": "REPLACE_WITH_PHOTOS_BUCKET" },
     { "binding": "BUCKET_MEDIA", "bucket_name": "REPLACE_WITH_MEDIA_BUCKET" },
   ],
+  // 1 バケット = 1 DO(idFromName(bucketId))。索引の実体はこの中の SQLite。
+  "durable_objects": {
+    "bindings": [{ "name": "OBJECT_INDEX", "class_name": "ObjectIndex" }],
+  },
+  // SQLite バックエンドを使うので new_sqlite_classes を指定する。
+  // 具象クラスだけを書く。中間クラス(SqliteStore)は登録しない。
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["ObjectIndex"] }],
 }
