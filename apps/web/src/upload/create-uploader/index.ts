@@ -125,7 +125,9 @@ export const createAwsS3Options = ({ client, bucketId, prefix }: AwsS3OptionsInp
         throw cause;
       }
       coordinator.complete(_file.id, session);
-      const location = client.buckets[':bucketId'].content[':path{.+}'].$url({ param: { bucketId, path: completed.key } }).toString();
+      // Uppy に返す完了 URL。complete 応答の etag をそのまま ?v= に載せる
+      // (一覧が組み立てる URL と同じ content-addressed な形になる)。
+      const location = client.buckets[':bucketId'].content[':path{.+}'].$url({ param: { bucketId, path: completed.key }, query: { v: completed.etag } }).toString();
 
       return { location, key: completed.key, bucket: bucketId };
     },

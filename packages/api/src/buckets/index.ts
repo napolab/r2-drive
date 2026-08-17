@@ -14,6 +14,17 @@ import type { HonoEnv } from '../env';
 
 const listQuery = z.object({ prefix: z.string().default(''), cursor: z.string().optional() });
 
+// content-addressed URL のバージョン。クライアントは ObjectDescriptor.etag(= httpEtag、
+// 引用符付き)をそのまま載せるので、ここでも引用符付きの文字列として素通しする。
+// クエリ文字列なので存在しないことがある。
+const contentQuery = z.object({ v: z.string().optional() });
+
+// v が現在の etag と一致する = URL がその中身だけを指しているので、無期限に固めてよい。
+// 上書きされれば etag が変わり URL も変わるため stale にならない。
+// Access 配下の非公開ファイルなので private を外さないこと(共有プロキシに保存させない)。
+const IMMUTABLE_CACHE_CONTROL = 'private, max-age=31536000, immutable';
+const REVALIDATE_CACHE_CONTROL = 'private, no-cache';
+
 export const buckets = new Hono<HonoEnv>()
   .get('/', (c) => c.json({ buckets: bucketDescriptors.map(({ id, label }) => ({ id, label })) }, 200))
   .get('/:bucketId/objects', zValidator('query', listQuery), async (c) => {
@@ -29,8 +40,9 @@ export const buckets = new Hono<HonoEnv>()
       (input) => toErrorResponse(c, new Error(`no object source for bucket: ${input.bucketId}`)),
     );
   })
-  .get('/:bucketId/content/:path{.+}', async (c) => {
+  .get('/:bucketId/content/:path{.+}', zValidator('query', contentQuery), async (c) => {
     const key = c.req.param('path');
+    const { v } = c.req.valid('query');
 
     return resolveBucket(c.env, c.req.param('bucketId')).match(
       async (bucket) => {
@@ -48,6 +60,9 @@ export const buckets = new Hono<HonoEnv>()
             object.writeHttpMetadata(headers);
             headers.set('accept-ranges', 'bytes');
             headers.set('etag', object.httpEtag);
+            // writeHttpMetadata の後に置く。R2 の httpMetadata.cacheControl を必ず上書きするため。
+            // バイト範囲は etag に対して不変なので、206 でも同じ判定でよい。
+            headers.set('cache-control', v === object.httpEtag ? IMMUTABLE_CACHE_CONTROL : REVALIDATE_CACHE_CONTROL);
 
             // R2 に渡した range はこの spec そのものなので、応答ヘッダも spec から直接計算する
             // (object.range を読み返すと 3 変分の判別可能ユニオンが `in` では narrow しきれない)。
