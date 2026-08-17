@@ -47,7 +47,7 @@ Phase 0 spec §5.2 と `docs/tasks.md` は Phase 1 を「D1 索引」と書い�
 |---|---|---|
 | 追加 binding | `d1_databases` + Queue 2 種 = 3 | **1** |
 | サイズ上限 | 10 GB **総量**(引き上げ不可) | **10 GB / バケット** |
-| 書き込みの原子性 | 別クエリ。索引と FTS の不整合の余地あり | **同一トランザクションに束ねられる** |
+| 書き込みの原子性 | 別クエリ。索引と FTS の不整合の余地あり | **同一 DB に同居しているので `transactionSync`(または委譲する Drizzle の `db.transaction()`)で明示的に束ねれば原子的になる。自動では束ねられない**(§4・§12) |
 | リトライ機構 | Queue(別インフラ) | **`alarm()` が内蔵**(at-least-once / 指数バックオフ) |
 | 同時 upsert の競合 | 設計が必要 | **単一 writer で原理的に起きない** |
 | 読み取りレイテンシ | 読取レプリカあり | **リージョン固定** |
@@ -60,8 +60,13 @@ Phase 0 spec §5.2 と `docs/tasks.md` は Phase 1 を「D1 索引」と書い�
 2. **Durable Object はこの製品に必ず来る。**Phase 0 spec §14 と CLAUDE.md の ref repository
    (`y-durableobjects` / `durabcast`)のとおり Phase 3 の共同編集は DO 前提である。
    Phase 1 で DO を導入する学習コストは Phase 3 で回収される
-3. **決定 7(FTS5 を明示的に書く)の唯一の弱点が構造的に消える。**「片方だけ書けて不整合になる」が
-   単一トランザクションで起きなくなる
+3. **決定 7(FTS5 を明示的に書く)の唯一の弱点を、`transactionSync`(または委譲する
+   Drizzle の `db.transaction()`)で塞げる。**ただし自動では塞がらない。D1 のように別クエリ
+   に分かれていないぶん「同一 DB に同居しているので囲むだけで済む」という利点は残るが、
+   **書き込み経路のすべてを `db.transaction()` で囲むことが前提**であり、囲い忘れれば
+   「片方だけ書けて不整合になる」がそのまま起きる(2026-08-17 実測、§4・§12)。この前提が
+   守られているかは §8 の「FTS5 の更新漏れを封じるテスト」と受け入れ基準 5 が保険ではなく
+   **本命の防波堤になる**
 
 ### 受け入れた代償
 
@@ -128,8 +133,12 @@ R2 では「フォルダ」は `list({ delimiter: '/' })` の副産物でしか�
 trigger でも external content 方式でも自動同期はできるが、**挙動がスキーマに隠れてテストで追いにくくなる。**
 `objects` を書き換える場所で `objects_fts` も書く。書き忘れは**テストで封じる**(§8)。
 
-決定 1(DO)により `objects` / `prefixes` / `objects_fts` の更新は同一トランザクションになるため、
-「片方だけ書けて不整合になる」という明示更新の弱点は構造的に消えている。
+決定 1(DO)により `objects` / `prefixes` / `objects_fts` は同一 DB に同居するが、**それだけでは
+同一トランザクションにならない。**2026-08-17 の実測(§12 リスク 2)のとおり、`await` を挟まない
+連続 `sql.exec` は失敗した文の直前までを自動ではロールバックしない。書き込み経路を
+`this.ctx.storage.transactionSync()`(または委譲する Drizzle の `db.transaction()`)で明示的に
+囲って初めて、「片方だけ書けて不整合になる」という明示更新の弱点が塞がる。**囲い忘れれば
+そのまま起きる。**この前提を守れているかは §8 のテストと受け入れ基準 5 で固定する。
 
 ### Drizzle を選んだ理由
 
@@ -142,12 +151,23 @@ npm を調査した(2026-08-17)。
 | Kysely 本体 | 健全だが **DO 用の公式 dialect が無い**。自作は「車輪の再発明」に該当する |
 | **`drizzle-orm`** | **0.45.2 / 2026-08-12。`./durable-sqlite` `./durable-sqlite/migrator` を一次サポート** |
 
-**検証済み**(§7、2026-08-17 実測): Drizzle の `await db.insert(...)` を連続で呼んだとき、
-Cloudflare が言う write coalescing(`await` を挟まない `sql.exec()` が 1 トランザクションになる)が
-保たれるかを `packages/api/test/drizzle-atomicity.test.ts` で確かめた。**保たれなかった**
-(1 本目が成功し 2 本目が失敗する連続 `sql.exec` を流したところ、1 本目は巻き戻らず残った)。
-**書き込み経路は `this.ctx.storage.transactionSync()` で明示的に囲う。**決定 1(`objects` /
-`prefixes` / `objects_fts` を同一トランザクションで更新する)の前提はこれで満たす。
+**検証済み**(§7、2026-08-17 実測、miniflare 上): 生の連続 `sql.exec()` が
+`packages/api/test/sql-exec-atomicity.test.ts` の対象。**連続した `sql.exec` は、失敗した文の
+直前までをロールバックしない。**これは失敗が prepare 段階か実行時かに依存せず、例外を捕まえる
+かどうかにも依存しない(UNIQUE 制約違反という実行時エラーで確認、かつ対照実験として
+`transactionSync` で同じ 2 文を囲うと正しくロールバックすることも確認した)。
+
+これは「Cloudflare の言う write coalescing が存在しない」という意味ではない。write coalescing は
+耐久性のバッチング(output gate)の話であり、「文が失敗したら直前まで巻き戻る」という原子性は
+元々そこに含まれていない。
+
+Drizzle 自体は未計測だが、`node_modules/drizzle-orm/durable-sqlite/session.js` を読むと
+`SQLiteDOSession#transaction()` は `this.client.transactionSync(() => transaction(tx))` に
+委譲しており、`run()` は `Promise` ではなく同期値を返す。**つまり Drizzle の `db.transaction(...)`
+は `ctx.storage.transactionSync()` と同じ保証を持つ。**書き込み経路は `transactionSync`
+(または委譲する Drizzle の `db.transaction()`)で明示的に囲う。決定 1(`objects` / `prefixes` /
+`objects_fts` を同一トランザクションで更新する)の前提はこれで満たすが、**囲い忘れれば
+満たされない。**§8 のテストと受け入れ基準 5 がこれを固定する。
 
 ## 5. Durable Object のクラス構成
 
@@ -288,7 +308,10 @@ export type BackfillStatus =
 - **索引を意図的に壊した状態で一覧が出ること**を固定する(Phase 0 spec §5.4 の要求)。
   ただし決定 4 により、これは「`indexed: false` なら R2 経路に落ちる」の検証になる
 - **FTS5 の更新漏れを封じるテスト** — `upsert` / `remove` の後に `search` の結果が追随すること。
-  決定 7(明示更新)の弱点をここで塞ぐ
+  決定 7(明示更新)の弱点をここで塞ぐ。**§12 リスク 2 の実測(連続 `sql.exec` は自動では原子的
+  にならない)により、このテストは保険ではなく本命の防波堤である。**書き込み経路が
+  `transactionSync` / `db.transaction()` で囲われているかを直接は見ないが、囲い忘れによる
+  `objects` と `objects_fts` の不整合は必ずここで検出される
 - **カーソル往復** — 全ページを繋ぐと投入した全キーが重複なく揃うこと
 
 **注意**: `@cloudflare/vitest-pool-workers` のストレージ分離は**テストファイル単位**である
@@ -355,7 +378,7 @@ Phase 0 spec §14 の未決事項「`ObjectHook` に `hookable` を使うか自�
 | # | 検証すること | falsy だった場合 |
 |---|---|---|
 | 1 | **DO SQLite で FTS5 が使えるか。**2026-08-17 に実測、DO SQLite で FTS5 は使える(`packages/api/test/fts5-availability.test.ts`。`CREATE VIRTUAL TABLE ... USING fts5(name)` から `MATCH` クエリまで通った) | 検索の設計だけ組み直す(`name LIKE ?` か別手段)。**索引の速さは影響を受けない** |
-| 2 | **Drizzle の `await` 連鎖で write coalescing が保たれるか**(§4)。2026-08-17 に実測、**保たれない**(`packages/api/test/drizzle-atomicity.test.ts`。2 本目が失敗しても 1 本目は残り、行数は 1 になった) | 書き込み経路は `this.ctx.storage.transactionSync()` で明示的に囲う。raw `sql.exec` を連続で呼ぶだけでは不十分 |
+| 2 | **`await` を挟まない連続 `sql.exec` が、失敗した文の直前までをロールバックするか**(§4)。2026-08-17 に **miniflare 上で** 実測、**ロールバックしない**(`packages/api/test/sql-exec-atomicity.test.ts`。UNIQUE 制約違反という実行時エラーで、先行する `INSERT` は残り行数は 2 になった。同じ 2 文を `transactionSync` で囲う対照実験では 1 に戻ることも確認した)。これは write coalescing(耐久性のバッチング)の否定ではない — 「文の失敗で直前まで巻き戻る」という原子性は元々 write coalescing の範囲外 | 書き込み経路は `transactionSync`(または委譲する Drizzle の `db.transaction()`。§4 で実ファイルを確認済み)で明示的に囲う。raw `sql.exec` を連続で呼ぶだけでは不十分 |
 
 ## 13. 受け入れ基準
 
@@ -363,6 +386,9 @@ Phase 0 spec §14 の未決事項「`ObjectHook` に `hookable` を使うか自�
 2. ファイル名の部分一致検索が 10,000 件から返る
 3. **`indexed: false` のバケットが Phase 0 と完全に同じ挙動をする**(回帰が無い)
 4. 索引を意図的に壊した状態でも `indexed: false` なら一覧が出る
-5. `upsert` / `remove` の後に `search` の結果が追随する(FTS5 の更新漏れが無い)
+5. `upsert` / `remove` の後に `search` の結果が追随する(FTS5 の更新漏れが無い)。**§12 リスク 2 の
+   実測により、これは保険ではなく本命の防波堤である。**`objects` / `objects_fts` の同時更新は
+   `transactionSync`(または Drizzle の `db.transaction()`)で明示的に囲わない限り原子的にならず、
+   囲い忘れは黙って不整合を生む。この基準が唯一それを検出できる
 6. バックフィルを途中で止めて再実行すると、続きから進んで全件揃う
 7. `ObjectDescriptor` と `NextPage` のワイヤ型が変わっていない(クライアント無変更)
