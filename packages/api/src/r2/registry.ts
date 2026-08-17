@@ -3,12 +3,20 @@ import { err, ok } from 'neverthrow';
 
 import type { Result } from 'neverthrow';
 
-type BucketDescriptor = { readonly id: string; readonly label: string; readonly binding: keyof Env };
+type BucketDescriptor = {
+  readonly id: string;
+  readonly label: string;
+  readonly binding: keyof Env;
+  // 索引を信じるかどうかは deploy 時に決める(Phase 1 spec §6)。
+  // Processor.run は同期なので「索引が ready か」を実行時に問い合わせられない。
+  // バックフィル完了を status で確認してから true にして deploy する。
+  readonly indexed: boolean;
+};
 
 // バケット追加は wrangler.jsonc に 1 行 + ここに 1 行 + 再デプロイ。
 export const bucketDescriptors = [
-  { id: 'photos', label: '写真', binding: 'BUCKET_PHOTOS' },
-  { id: 'media', label: 'メディア', binding: 'BUCKET_MEDIA' },
+  { id: 'photos', label: '写真', binding: 'BUCKET_PHOTOS', indexed: false },
+  { id: 'media', label: 'メディア', binding: 'BUCKET_MEDIA', indexed: false },
 ] as const satisfies readonly BucketDescriptor[];
 
 // registry からリテラル union を導出する。バケットを足すと型が自動で広がる。
