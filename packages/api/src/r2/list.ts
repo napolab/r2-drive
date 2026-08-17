@@ -5,22 +5,29 @@ import mime from 'mime';
 import type { DriveError, ObjectPage, Prefix } from '@r2-drive/core';
 import type { ResultAsync } from 'neverthrow';
 
-const PAGE_SIZE = 200;
-
 const nameOf = (key: string): string => key.slice(key.lastIndexOf('/') + 1);
 
-// R2 の httpMetadata が空のときは拡張子から確定させる。contentType を optional にしない。
-const contentTypeOf = (key: string, meta: R2HTTPMetadata | undefined): string => meta?.contentType ?? mime.getType(key) ?? 'application/octet-stream';
+// contentType は常に拡張子から確定させる。R2 に保存済みの httpMetadata は参照しない。
+//
+// 理由: list() に include: ['httpMetadata'] を付けると R2 がレスポンス全体のデータ量で
+// 打ち切り、limit をいくつにしても 1 ページ 100 件に丸められる(実測: limit 1000 + include
+// で 100 件、include 無しで 1000 件)。10,000 件のフォルダで 100 往復になり、1 ページ
+// 追加ごとにクライアントのコレクション再構築が走るため往復数がそのまま体感に効く。
+//
+// 代償: R2 に保存された httpMetadata.contentType が拡張子と食い違っていても拡張子が勝つ。
+// 一覧のアイコン/プレビュー判定にしか使わないので許容する。正確な contentType が要るのは
+// 単体取得(get.ts)側で、そちらは head()/get() が httpMetadata をそのまま返す。
+const contentTypeOf = (key: string): string => mime.getType(key) ?? 'application/octet-stream';
 
-export type ListInput = { readonly bucket: R2Bucket; readonly bucketId: string; readonly prefix: Prefix; readonly cursor: string | undefined };
+// limit は呼び出し元から注入する。モジュール定数にすると truncated 経路をテストで作れない。
+export type ListInput = { readonly bucket: R2Bucket; readonly bucketId: string; readonly prefix: Prefix; readonly cursor: string | undefined; readonly limit: number };
 
 // exactOptionalPropertyTypes 下では cursor: undefined を明示的に渡せない。
 // cursor キー自体を spread の有無で作るかどうか分岐する。
 const listOptionsOf = (input: ListInput): R2ListOptions => ({
   prefix: input.prefix,
   delimiter: '/',
-  limit: PAGE_SIZE,
-  include: ['httpMetadata'],
+  limit: input.limit,
   ...(input.cursor === undefined ? {} : { cursor: input.cursor }),
 });
 
@@ -35,7 +42,7 @@ export const listObjects = (input: ListInput): ResultAsync<ObjectPage, DriveErro
         bucketId: input.bucketId,
         key: object.key,
         name: nameOf(object.key),
-        contentType: contentTypeOf(object.key, object.httpMetadata),
+        contentType: contentTypeOf(object.key),
         size: object.size,
         uploadedAt: object.uploaded.toISOString(),
         etag: object.httpEtag,
