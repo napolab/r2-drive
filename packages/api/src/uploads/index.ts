@@ -5,6 +5,9 @@ import { fromPromise } from 'neverthrow';
 import { z } from 'zod';
 
 import { toErrorResponse } from '../errors/to-error-response';
+import { keyPartsOf } from '../object-index/key-parts/index';
+import { indexUpsert } from '../object-index/registry';
+import { contentTypeOf } from '../r2/list';
 import { resolveBucket } from '../r2/registry';
 
 import type { HonoEnv } from '../env';
@@ -26,10 +29,27 @@ export const uploads = new Hono<HonoEnv>()
 
     return resolveBucket(c.env, c.req.param('bucketId')).match(
       async (bucket) =>
-        fromPromise(bucket.put(c.req.valid('query').key, body, { httpMetadata: { contentType } }), (cause) => new R2OperationError('single upload failed', { cause })).match(
-          (object) => c.json({ key: object.key, etag: object.httpEtag }, 200, { etag: object.httpEtag }),
-          (error) => toErrorResponse(c, error),
-        ),
+        fromPromise(bucket.put(c.req.valid('query').key, body, { httpMetadata: { contentType } }), (cause) => new R2OperationError('single upload failed', { cause }))
+          .andThen((object) => {
+            const bucketId = c.req.param('bucketId');
+            const { name } = keyPartsOf(object.key);
+
+            return indexUpsert(c.env, {
+              bucketId,
+              key: object.key,
+              name,
+              // Ruling 16: 索引の contentType はリクエストヘッダではなく拡張子由来
+              // (r2/list.ts の contentTypeOf)にする。R2 一覧経路と揃えるため。
+              contentType: contentTypeOf(object.key),
+              size: object.size,
+              uploadedAt: object.uploaded.toISOString(),
+              etag: object.httpEtag,
+            }).map(() => object);
+          })
+          .match(
+            (object) => c.json({ key: object.key, etag: object.httpEtag }, 200, { etag: object.httpEtag }),
+            (error) => toErrorResponse(c, error),
+          ),
       async (error) => toErrorResponse(c, error),
     );
   })
@@ -74,10 +94,26 @@ export const uploads = new Hono<HonoEnv>()
       async (bucket) => {
         const upload = bucket.resumeMultipartUpload(key, c.req.param('uploadId'));
 
-        return fromPromise(upload.complete(parts.map((p) => ({ partNumber: p.partNumber, etag: p.etag }))), (cause) => new UploadSessionError('unknown-upload-id', { cause })).match(
-          (object) => c.json({ key: object.key, etag: object.httpEtag }, 200),
-          (error) => toErrorResponse(c, error),
-        );
+        return fromPromise(upload.complete(parts.map((p) => ({ partNumber: p.partNumber, etag: p.etag }))), (cause) => new UploadSessionError('unknown-upload-id', { cause }))
+          .andThen((object) => {
+            const bucketId = c.req.param('bucketId');
+            const { name } = keyPartsOf(object.key);
+
+            return indexUpsert(c.env, {
+              bucketId,
+              key: object.key,
+              name,
+              // Ruling 16: 単発 PUT と同じく、拡張子由来の contentType を書く。
+              contentType: contentTypeOf(object.key),
+              size: object.size,
+              uploadedAt: object.uploaded.toISOString(),
+              etag: object.httpEtag,
+            }).map(() => object);
+          })
+          .match(
+            (object) => c.json({ key: object.key, etag: object.httpEtag }, 200),
+            (error) => toErrorResponse(c, error),
+          );
       },
       async (error) => toErrorResponse(c, error),
     );

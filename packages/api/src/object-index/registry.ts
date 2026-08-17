@@ -1,9 +1,10 @@
-import { BucketNotFoundError } from '@r2-drive/core';
-import { err, ok } from 'neverthrow';
+import { BucketNotFoundError, R2OperationError } from '@r2-drive/core';
+import { err, ok, ResultAsync } from 'neverthrow';
 
 import { bucketDescriptors } from '../r2/registry';
 
 import type { ObjectIndex } from './index';
+import type { DriveError, ObjectDescriptor } from '@r2-drive/core';
 import type { Result } from 'neverthrow';
 
 // apps/web/src/worker.ts は ObjectIndex を値として import していない(spec §11.3、
@@ -33,3 +34,12 @@ export const resolveObjectIndex = (env: Env, id: string): Result<DurableObjectSt
 // 到達不能な比較として弾く(TS2367)。`?? false` なら、将来 indexed: true の要素が
 // 増えて union が広がっても書き換え不要。
 export const isIndexed = (id: string): boolean => bucketDescriptors.find((d) => d.id === id)?.indexed ?? false;
+
+// indexed かどうかに関わらず書く。索引を後から有効化するとき、
+// 「有効化前にアップロードされた分が抜けている」を防ぐため
+// (抜けるとバックフィルをやり直す必要が出る)。
+export const indexUpsert = (env: Env, object: ObjectDescriptor): ResultAsync<void, DriveError> =>
+  resolveObjectIndex(env, object.bucketId).asyncAndThen((stub) => ResultAsync.fromPromise(stub.upsert(object), (cause) => new R2OperationError(`index upsert failed: ${object.key}`, { cause })));
+
+export const indexRemove = (env: Env, bucketId: string, key: string): ResultAsync<void, DriveError> =>
+  resolveObjectIndex(env, bucketId).asyncAndThen((stub) => ResultAsync.fromPromise(stub.remove(key), (cause) => new R2OperationError(`index remove failed: ${key}`, { cause })));

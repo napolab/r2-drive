@@ -17,7 +17,13 @@ const nameOf = (key: string): string => key.slice(key.lastIndexOf('/') + 1);
 // 代償: R2 に保存された httpMetadata.contentType が拡張子と食い違っていても拡張子が勝つ。
 // 一覧のアイコン/プレビュー判定にしか使わないので許容する。正確な contentType が要るのは
 // 単体取得(get.ts)側で、そちらは head()/get() が httpMetadata をそのまま返す。
-const contentTypeOf = (key: string): string => mime.getType(key) ?? 'application/octet-stream';
+//
+// export する理由(Ruling 16): 索引(object-index)に書き込む contentType もこの関数から
+// 導出する。索引書き込み側がリクエストの content-type ヘッダをそのまま書くと、同じキーが
+// indexed の有無で違う contentType を返してしまう(例: photo.bin を content-type: image/jpeg
+// でアップロードすると、R2 経路は application/octet-stream、索引経路は image/jpeg になる)。
+// 同じ関数を通すことで構造的に一致させる。
+export const contentTypeOf = (key: string): string => mime.getType(key) ?? 'application/octet-stream';
 
 // limit は呼び出し元から注入する。モジュール定数にすると truncated 経路をテストで作れない。
 export type ListInput = { readonly bucket: R2Bucket; readonly bucketId: string; readonly prefix: Prefix; readonly cursor: string | undefined; readonly limit: number };
