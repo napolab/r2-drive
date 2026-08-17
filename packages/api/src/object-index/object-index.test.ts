@@ -185,3 +185,92 @@ describe('ObjectIndex のバケット guard', () => {
     await expect(stub.debugFtsKeys()).resolves.toEqual(['a.txt']);
   });
 });
+
+describe('ObjectIndex の一覧', () => {
+  it('指定した prefix 直下のオブジェクトだけを key 順で返す', async () => {
+    const stub = stubFor('list-basic');
+    await stub.upsert(descriptorOf('a/2.txt'));
+    await stub.upsert(descriptorOf('a/1.txt'));
+    await stub.upsert(descriptorOf('a/b/deep.txt'));
+    await stub.upsert(descriptorOf('root.txt'));
+
+    const page = await stub.list({ bucketId: 'photos', prefix: 'a/', cursor: undefined, limit: 10 });
+
+    expect(page.objects.map((o) => o.key)).toEqual(['a/1.txt', 'a/2.txt']);
+    expect(page.next).toEqual({ kind: 'end' });
+  });
+
+  it('直下のフォルダを folders に返す', async () => {
+    const stub = stubFor('list-folders');
+    await stub.upsert(descriptorOf('a/b/deep.txt'));
+    await stub.upsert(descriptorOf('a/c/deep.txt'));
+    await stub.upsert(descriptorOf('a/x.txt'));
+
+    const page = await stub.list({ bucketId: 'photos', prefix: 'a/', cursor: undefined, limit: 10 });
+
+    expect(page.folders.map((f) => f.prefix)).toEqual(['a/b/', 'a/c/']);
+    expect(page.folders.map((f) => f.name)).toEqual(['b', 'c']);
+  });
+
+  it('limit を超えると next が more になり cursor で続きが取れる', async () => {
+    const stub = stubFor('list-cursor');
+    await stub.upsert(descriptorOf('a/1.txt'));
+    await stub.upsert(descriptorOf('a/2.txt'));
+    await stub.upsert(descriptorOf('a/3.txt'));
+
+    const first = await stub.list({ bucketId: 'photos', prefix: 'a/', cursor: undefined, limit: 2 });
+    expect(first.objects.map((o) => o.key)).toEqual(['a/1.txt', 'a/2.txt']);
+    if (first.next.kind !== 'more') throw new Error('next が more にならなかった');
+
+    const second = await stub.list({ bucketId: 'photos', prefix: 'a/', cursor: first.next.cursor, limit: 2 });
+    expect(second.objects.map((o) => o.key)).toEqual(['a/3.txt']);
+    expect(second.next).toEqual({ kind: 'end' });
+  });
+
+  it('2 ページ目以降は folders を返さない(1 ページ目で出し切る)', async () => {
+    const stub = stubFor('list-folders-once');
+    await stub.upsert(descriptorOf('a/b/deep.txt'));
+    await stub.upsert(descriptorOf('a/1.txt'));
+    await stub.upsert(descriptorOf('a/2.txt'));
+
+    const first = await stub.list({ bucketId: 'photos', prefix: 'a/', cursor: undefined, limit: 1 });
+    expect(first.folders).toHaveLength(1);
+    if (first.next.kind !== 'more') throw new Error('next が more にならなかった');
+
+    const second = await stub.list({ bucketId: 'photos', prefix: 'a/', cursor: first.next.cursor, limit: 1 });
+    expect(second.folders).toEqual([]);
+  });
+
+  it('返す ObjectDescriptor は渡した bucketId を持つ', async () => {
+    const stub = stubFor('list-bucket-id');
+    await stub.upsert(descriptorOf('a/1.txt'));
+
+    const page = await stub.list({ bucketId: 'media', prefix: 'a/', cursor: undefined, limit: 10 });
+
+    expect(page.objects[0]?.bucketId).toBe('media');
+  });
+
+  // Ruling 2: remove は prefixes 行を消さない設計なので、中身が全部消えたフォルダが
+  // 幽霊フォルダとして一覧に残ってはいけない。R2 経路(delimitedPrefixes)には
+  // この現象が存在しないので、indexed の有無で挙動が変わらないことを固定する。
+  it('配下の唯一のオブジェクトを remove すると幽霊フォルダが folders に出ない', async () => {
+    const stub = stubFor('list-ghost-folder');
+    await stub.upsert(descriptorOf('a/b/c.txt'));
+    await stub.remove('a/b/c.txt');
+
+    const page = await stub.list({ bucketId: 'photos', prefix: 'a/', cursor: undefined, limit: 10 });
+
+    expect(page.folders.map((f) => f.prefix)).not.toContain('a/b/');
+  });
+
+  // 上のテストの positive control。EXISTS を外す変異で「常に folders が出る」実装にすり替わっても、
+  // このテスト単体は通ってしまう。ghost-folder テストと対にして初めて EXISTS の有無を検出できる。
+  it('配下にオブジェクトが残っていれば folders に出る', async () => {
+    const stub = stubFor('list-folder-with-object');
+    await stub.upsert(descriptorOf('a/b/c.txt'));
+
+    const page = await stub.list({ bucketId: 'photos', prefix: 'a/', cursor: undefined, limit: 10 });
+
+    expect(page.folders.map((f) => f.prefix)).toContain('a/b/');
+  });
+});
