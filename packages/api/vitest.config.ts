@@ -7,7 +7,9 @@ export default defineConfig({
       main: './test/worker-entry.ts',
       miniflare: {
         r2Buckets: ['BUCKET_PHOTOS', 'BUCKET_MEDIA'],
-        durableObjects: { OBJECT_INDEX: { className: 'ObjectIndex', useSQLite: true } },
+        // 本番の class_name は 'ObjectIndex'(apps/web/wrangler.jsonc)。テストでは
+        // 覗き見用のメソッドを足したサブクラスを実体化する(test/worker-entry.ts)。
+        durableObjects: { OBJECT_INDEX: { className: 'ObjectIndexUnderTest', useSQLite: true } },
         bindings: { ACCESS_TEAM: 'test', ACCESS_AUD: 'test', IDENTITY_PROVIDER: 'static' },
       },
     }),

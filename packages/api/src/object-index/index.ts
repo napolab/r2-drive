@@ -1,18 +1,25 @@
 import { count as countRows, eq } from 'drizzle-orm';
 
+import { BucketMismatchError } from './errors';
 import { keyPartsOf } from './key-parts/index';
-import { objects, prefixes } from './schema';
+import { meta, objects, prefixes } from './schema';
 import { SqliteStore } from './sqlite-store';
 
 import type { ObjectDescriptor } from '@r2-drive/core';
+import type { DrizzleSqliteDODatabase } from 'drizzle-orm/durable-sqlite';
 
-type ObjectRow = typeof objects.$inferSelect;
+// 1 バケット = 1 DO の不変条件を DO 側に焼き付けるための meta キー。
+export const BUCKET_ID_KEY = 'bucket_id';
+
+// db.transaction() のコールバックが受け取る tx。Drizzle は型名を公開していないので
+// database 型から引き出す。
+type Tx = Parameters<Parameters<DrizzleSqliteDODatabase<Record<string, never>>['transaction']>[0]>[0];
 
 // prefix('a/b/') の親 prefix は、末尾の '/' を落としたキーの親と同じ。
 const parentPrefixOf = (prefix: string): string => keyPartsOf(prefix.slice(0, -1)).parentPrefix;
 
 export class ObjectIndex extends SqliteStore {
-  // objects / prefixes は Drizzle で、objects_fts(FTS5 の仮想テーブル。Drizzle では
+  // objects / prefixes / meta は Drizzle で、objects_fts(FTS5 の仮想テーブル。Drizzle では
   // 表現できない)は raw sql.exec で書く。両方を db.transaction() の中に置くことで
   // 同一トランザクションに乗せる。Drizzle の db.transaction() は durable-sqlite では
   // ctx.storage.transactionSync() に直接委譲しているので、raw sql.exec も同じ
@@ -24,6 +31,10 @@ export class ObjectIndex extends SqliteStore {
   // 囲うと 1 行に戻ることを対照実験で確認している(test/sql-exec-atomicity.test.ts)。
   // なお Cloudflare の言う write coalescing は耐久性のバッチング(output gate)の話で、
   // 文の失敗によるロールバックは元々そこに含まれていない。
+  //
+  // object.name は保存しない。name は key から一意に決まる派生値なので、
+  // keyPartsOf(key).name を唯一の出典にする(呼び出し側が矛盾した name を渡しても
+  // 索引は key に従う)。
   upsert(object: ObjectDescriptor): void {
     const { name, parentPrefix, ancestorPrefixes } = keyPartsOf(object.key);
     const updates = {
@@ -36,6 +47,7 @@ export class ObjectIndex extends SqliteStore {
     };
 
     this.db.transaction((tx) => {
+      this.#bindBucket(tx, object.bucketId);
       tx.insert(objects)
         .values({ key: object.key, ...updates })
         .onConflictDoUpdate({ target: objects.key, set: updates })
@@ -65,82 +77,28 @@ export class ObjectIndex extends SqliteStore {
 
   count(): number {
     // countRows は drizzle-orm の count()。このメソッド名と紛れるので別名で入れている。
-    const [row] = this.db.select({ total: countRows() }).from(objects).all();
+    const row = this.db.select({ total: countRows() }).from(objects).get();
 
+    // COUNT(*) は必ず 1 行返るので ?? 0 は到達しない。noUncheckedIndexedAccess ではなく
+    // Drizzle の get() が T | undefined を返す型都合のための既定値である。
     return row?.total ?? 0;
   }
 
-  // ここから下はテスト専用。RPC で読めるようにメソッドとして公開する。
-  debugRow(key: string): ObjectRow | undefined {
-    const [row] = this.db.select().from(objects).where(eq(objects.key, key)).all();
+  // 1 バケット = 1 DO は idFromName(bucketId) を呼ぶ側の不変条件にすぎず、DO 自身は
+  // 誰が入れたかを知らない。初回 upsert で bucket_id を meta に焼き、以降は不一致を
+  // 例外にする。誤ルーティングで索引が静かに混ざるのが最悪の失敗モードなので、
+  // 静かに成功させない(Ruling 11)。
+  //
+  // meta は guard であって source ではない。list / search が返す bucketId の出所は
+  // 引き続き呼び出し側の引数である(ワイヤ互換とページング設計を変えないため)。
+  #bindBucket(tx: Tx, bucketId: string): void {
+    const bound = tx.select({ v: meta.v }).from(meta).where(eq(meta.k, BUCKET_ID_KEY)).get();
 
-    return row;
-  }
+    if (bound === undefined) {
+      tx.insert(meta).values({ k: BUCKET_ID_KEY, v: bucketId }).run();
 
-  debugPrefixes(): readonly string[] {
-    return this.db
-      .select({ prefix: prefixes.prefix })
-      .from(prefixes)
-      .orderBy(prefixes.prefix)
-      .all()
-      .map((row) => row.prefix);
-  }
-
-  // 以下 4 つは Task 1 / 2 が DO SQLite の性質を実測で固定するための probe。
-  // 実装の一部ではないが、この 2 つの事実(FTS5 が使える / 連続 sql.exec は原子的でない)
-  // の上に upsert の設計が乗っているので、回帰検出のために残している。
-  debugProbeFts(): readonly string[] {
-    this.ctx.storage.sql.exec(`CREATE VIRTUAL TABLE IF NOT EXISTS probe_fts USING fts5(name)`);
-    this.ctx.storage.sql.exec(`INSERT INTO probe_fts (name) VALUES (?)`, '休暇の写真 vacation-2026.jpg');
-    this.ctx.storage.sql.exec(`INSERT INTO probe_fts (name) VALUES (?)`, 'invoice-2026-04.pdf');
-
-    const rows = this.ctx.storage.sql.exec<{ name: string }>(`SELECT name FROM probe_fts WHERE probe_fts MATCH ? ORDER BY rank`, 'vacation').toArray();
-
-    return rows.map((row) => row.name);
-  }
-
-  // 測定対象(debugProbeAtomicityWith*)とは別の RPC 呼び出しに出すセットアップ。
-  // CREATE / DELETE / seed をここで確実に完了させ、await 境界を挟むことで、
-  // 測定対象の 2 文が「たまたま CREATE ごと巻き戻った」結果を原子性の証拠と
-  // 誤読しないようにする。'seed' は 2 回目の INSERT で意図的に再利用し、
-  // 実行時の UNIQUE 制約違反を起こすために残す。
-  debugSetupAtomicityProbe(): void {
-    this.ctx.storage.sql.exec(`CREATE TABLE IF NOT EXISTS probe_a (k TEXT PRIMARY KEY)`);
-    this.ctx.storage.sql.exec(`DELETE FROM probe_a`);
-    this.ctx.storage.sql.exec(`INSERT INTO probe_a (k) VALUES (?)`, 'seed');
-  }
-
-  // debugSetupAtomicityProbe() の後に呼ぶこと。'first' の INSERT は成功し、
-  // 'seed' の再 INSERT は主キー重複で実行時に確実に失敗する(prepare 段階では
-  // 落ちない)。束ねられて原子的なら 'first' も巻き戻り行数は 1(seed のみ)、
-  // 束ねられないなら 'first' が残り行数は 2 になる。
-  debugProbeAtomicityWithoutTransaction(): number {
-    try {
-      this.ctx.storage.sql.exec(`INSERT INTO probe_a (k) VALUES (?)`, 'first');
-      // 主キー重複による UNIQUE 制約違反。実行時に確実に失敗する。
-      this.ctx.storage.sql.exec(`INSERT INTO probe_a (k) VALUES (?)`, 'seed');
-    } catch {
-      // 例外は握る。ここで見たいのは probe_a の中身だけ。
+      return;
     }
-
-    return this.ctx.storage.sql.exec<{ n: number }>(`SELECT COUNT(*) AS n FROM probe_a`).one().n;
-  }
-
-  // debugProbeAtomicityWithoutTransaction() の対照実験。同じ 2 文を
-  // this.ctx.storage.transactionSync() で明示的に囲う。巻き戻り機構自体が
-  // この環境で動くことを示すための positive control。
-  debugProbeAtomicityWithTransactionSync(): number {
-    try {
-      this.ctx.storage.transactionSync(() => {
-        this.ctx.storage.sql.exec(`INSERT INTO probe_a (k) VALUES (?)`, 'first');
-        // 主キー重複による UNIQUE 制約違反。実行時に確実に失敗する。
-        this.ctx.storage.sql.exec(`INSERT INTO probe_a (k) VALUES (?)`, 'seed');
-      });
-    } catch {
-      // transactionSync はロールバック後に元の例外を再送出する。ここで見たいのは
-      // probe_a の中身だけなので握る。
-    }
-
-    return this.ctx.storage.sql.exec<{ n: number }>(`SELECT COUNT(*) AS n FROM probe_a`).one().n;
+    if (bound.v !== bucketId) throw new BucketMismatchError(`${bound.v}`, bucketId);
   }
 }
