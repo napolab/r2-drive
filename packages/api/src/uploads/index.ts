@@ -34,6 +34,11 @@ export const uploads = new Hono<HonoEnv>()
             const bucketId = c.req.param('bucketId');
             const { name } = keyPartsOf(object.key);
 
+            // indexUpsert が失敗すると、この直前の bucket.put はすでに成功している。
+            // それでも R2 の書き込みは巻き戻さない(spec の原則: R2 が真実である。
+            // 索引は後付けの読み取り加速層であり、壊れていても一覧は出続けること)。
+            // ここは同じキーへの再アップロードで自己修復できる(multipart complete は
+            // uploadId を消費済みで再試行が効かないため事情が異なる。そちらのコメント参照)。
             return indexUpsert(c.env, {
               bucketId,
               key: object.key,
@@ -99,6 +104,17 @@ export const uploads = new Hono<HonoEnv>()
             const bucketId = c.req.param('bucketId');
             const { name } = keyPartsOf(object.key);
 
+            // indexUpsert が失敗すると、この直前の upload.complete はすでに成功しており
+            // R2 にオブジェクトが存在する。それでも巻き戻さない(単発 PUT と同じく、
+            // R2 が真実であるという spec の原則に従う)。索引を先に書いて R2 を後にする
+            // 逆順にはしない — その場合「索引にはあるが R2 には無い」状態が起こりえて、
+            // 一覧には出るのに開けないオブジェクトという、今より悪い失敗モードになる。
+            //
+            // ただしここは単発 PUT と事情が異なる: uploadId はこの complete で
+            // 消費済みのため、失敗しても同じ uploadId での単純なリトライが効かない。
+            // クライアントに返るのは失敗だが R2 には残る、という非対称が生まれる。
+            // この場合の回復手段はバックフィル(Task 10)である。バックフィルは
+            // 冪等な upsert なので、次回実行時にこの取りこぼしを自然に拾う。
             return indexUpsert(c.env, {
               bucketId,
               key: object.key,
