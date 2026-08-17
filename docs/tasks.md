@@ -64,54 +64,57 @@
       「O(n) の作り直し」は計測から導いた**推論であって、実装を読んで確かめてはいない**
 - [ ] **画像プレビューの初回コストは残っている。**再訪はキャッシュで消えたが、
       初回は依然 15 秒のスクロールで 196 MB。142px 四方に 1280x960 を配っているため。
-      **派生サムネイル(Phase 1 の `ObjectHook` の実装 1 つ)で 1/60 になる**
+      **派生サムネイルで 1/60 になる。**Phase 1 では意図的に外した(Phase 1 spec §9)
 
 ---
 
-## Phase 1 — D1 索引
+## Phase 1 — オブジェクト索引と検索
 
-### なぜやるか
+**設計は [`docs/superpowers/specs/2026-08-17-r2-drive-phase-1-design.md`](./superpowers/specs/2026-08-17-r2-drive-phase-1-design.md)。**
+以下はそこから実行できる粒度に落としたものだけ。判断の根拠は spec を読むこと。
 
-痛点の残り 3 つが、すべて `R2.list()` の構造的限界に由来する(spec §1)。
+### 前提が 2 つ変わった
 
-| 痛点 | 原因 |
-|---|---|
-| 1 フォルダ 1000 件超で一覧が遅い | `R2.list()` はカーソル走査しかできない |
-| 検索が使い物にならない | `R2.list()` に検索が無い |
-| サムネイルが無い | 派生ファイルの索引が無い |
+Phase 0 spec は Phase 1 を「D1 索引」「`ObjectHook` を導入」と書いていたが、**どちらも変更した。**
 
-**R2 が真実であるという原則は崩さない。**索引はあくまで後付けのキャッシュ層で、
-壊れてもバックフィル中でも一覧は出続けること(下記 `ObjectSource` を参照)。
+| | Phase 0 spec | Phase 1 spec |
+|---|---|---|
+| 索引の基盤 | D1 | **Durable Object の SQLite**(1 バケット = 1 DO) |
+| `ObjectHook` | Phase 1 で導入 | **導入しない**(実装が 1 つになるため) |
 
-### 拡張点をここで 2 つ導入する
+追加 binding は **`OBJECT_INDEX` の 1 つだけ**。新しい抽象はゼロ。`ObjectDescriptor` のワイヤ型も変わらない。
 
-Phase 0 で作らなかったのは、実装が 0 個または 1 個だったからである。Phase 1 で
-**2 つ目が同時に登場する**ので、ここで初めて正当化される(spec §5.2)。
+### 着手前に潰す(実装計画の最初の 2 つ)
 
-- [ ] **`ObjectHook`(アップロード後処理)** — 実装は「索引書き込み」と「サムネイル生成」の 2 つ
-  - [ ] `hookable` を使うか自作するか決める(spec §14 の未決事項)。
-        Phase 0 で不採用にした判断を、実装 2 つを前にして再評価する
-  - [ ] ディスパッチは `packages/core/src/create-runner.ts` を共有する。
-        新しいディスパッチ形を発明しない
-- [ ] **`ObjectSource`(一覧のデータ供給元)** — 実装は 2 つ
-  - [ ] `indexedSource` — 索引済みバケットだけ `ok` を返す
-  - [ ] `r2ListSource` — 常に `ok`。索引が無い / 追いついていないバケットの受け皿
-  - [ ] registry の順序は `[indexedSource, r2ListSource]`。**フォールバックは必ず最後**
-  - [ ] 索引を意図的に壊した状態で一覧が出ることをテストで固定する
+- [ ] **DO SQLite で FTS5 が使えることを実測で確かめる。**falsy なら検索の設計だけ組み直す
+- [ ] **Drizzle の `await` 連鎖で write coalescing が保たれるかを確かめる。**
+      falsy なら明示トランザクションで囲うか、書き込み経路だけ raw `sql.exec` にする
 
-### 索引そのもの
+### DO と索引
 
-- [ ] D1 のスキーマを決める(key / size / contentType / uploadedAt / etag / 幅・高さ・尺)
-- [ ] **FTS5 で全文検索を張る。**spec §5 いわく、これだけで検索要求の大半が満たせる可能性がある。
-      **Phase 5(Vectorize 意味検索)の要否は、これを実際に使ってから判断する**
-- [ ] 既存バケットのバックフィル経路を作る。途中で失敗しても再実行できること
-- [ ] **`MediaFacts` は variant で入れる。**`width?` / `height?` / `duration?` の
-      3 つの optional を生やさない。それは 3 つの optional ではなく 1 つの状態である
-      (`.claude/rules` の「optional field を作らない」/ spec §5.6)
+- [ ] `SqliteStore`(基底)→ `ObjectIndex` の継承構成。**RPC は prototype chain を見るので
+      継承メソッドも公開される。**arrow property で書くと stub から呼べなくなる
+- [ ] スキーマ 4 表(`objects` / `prefixes` / `objects_fts` / `meta`)。`bucket_id` 列は持たない
+- [ ] `worker.ts` が `export { ObjectIndex } from '@r2-drive/api'` で再輸出する
+- [ ] **FTS5 は upsert と同じ書き込み経路で明示的に更新する。**更新漏れはテストで封じる
 
-```ts
-// Phase 1 で追加: ObjectDescriptor & { readonly media: MediaFacts }
-```
+### 経路
+
+- [ ] アップロード / 削除の後に `stub.upsert()` / `stub.remove()` を await する
+- [ ] `indexedSource` を registry の先頭に足す。判定は `bucketDescriptors.indexed`(**deploy 時の設定**)
+- [ ] `GET /buckets/:id/search?q` を足す。戻りは既存の `ObjectPage`
+- [ ] バックフィル: `alarm()` が R2 を 1,000 件ずつ舐めてカーソルを `meta` に置く。冪等であること
+- [ ] 起動 `POST /buckets/:id/index/backfill` と観測 `GET /buckets/:id/index/status`
+
+### 意図的に外したもの(理由は spec §9)
+
+サムネイル生成 / `ObjectHook` / `runAll` / Cloudflare Queues / `IMAGES` binding /
+`MediaFacts` / 空フォルダの表現 / R2 SQL / Vectorize。
+
+**入れる条件も spec §9 に書いてある。**「サムネイル生成 + もう 1 つの後処理」が揃ったとき、
+初めて `ObjectHook` の実装が 2 つになり拡張点の導入根拠が立つ。
+**課金は障壁ではない**(`IMAGES.info()` は常に無料、変換は月 5,000 unique まで無料)。
+**外した理由は複雑さである。**
 
 ### Phase 1 で必ず対処すると決めたもの
 
