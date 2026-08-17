@@ -29,8 +29,13 @@ type Props = {
   readonly onPrefetchFolder: (prefix: string) => void;
   readonly onExternalFiles: (files: readonly File[]) => void;
   readonly onExternalFileError: (error: Error) => void;
-  // 1 ページ 200 件。末尾に近づいたら次のカーソルを取りに行く。これが無いと
-  // 10,000 件のフォルダは最初の 200 件までしか到達できない(受け入れ基準 1)。
+  // 1 ページ 1,000 件(`plugins/object-source/r2-list` の R2_LIST_PAGE_SIZE)。
+  // 末尾に近づいたら次のカーソルを取りに行く。これが無いと 10,000 件のフォルダは
+  // 最初の 1 ページ分までしか到達できない(受け入れ基準 1)。
+  //
+  // 件数は性能に直結する。1 回の追加コストはページの件数ではなく、その時点の
+  // コレクション全体の件数で決まる(reports/2026-08-17-task-16-perf.md)。
+  // だからページを大きくすると「重い追加の回数」が減る。1 回の長さは減らない。
   readonly onLoadMore: () => void;
   readonly isLoadingMore: boolean;
 };
