@@ -1,15 +1,38 @@
 import { and, asc, count as countRows, eq, gt, ne } from 'drizzle-orm';
 
+import { contentTypeOf } from '../r2/list';
+import { resolveBucket } from '../r2/registry';
+
 import { BucketMismatchError } from './errors';
 import { keyPartsOf } from './key-parts/index';
 import { meta, objects, prefixes } from './schema';
 import { SqliteStore } from './sqlite-store';
 
+import type { BackfillStatus } from './status';
 import type { FolderDescriptor, NextPage, ObjectDescriptor, ObjectPage } from '@r2-drive/core';
 import type { DrizzleSqliteDODatabase } from 'drizzle-orm/durable-sqlite';
 
 // 1 バケット = 1 DO の不変条件を DO 側に焼き付けるための meta キー。
 export const BUCKET_ID_KEY = 'bucket_id';
+
+// バックフィルの状態は meta 表に置く。BUCKET_ID_KEY(Ruling 11 の誤ルーティング検出)と
+// 同じ表を共有するので、キー名を backfill_ で名前空間化して衝突を避ける。
+// **meta を一括クリアする操作を書かないこと。**bucket_id ごと消えると guard が静かに
+// 無効になり、誤ルーティングした upsert が通ってしまう。触るときは必ずキー単位で触る。
+const BACKFILL_STATE_KEY = 'backfill_state';
+const BACKFILL_CURSOR_KEY = 'backfill_cursor';
+const BACKFILL_BUCKET_ID_KEY = 'backfill_bucket_id';
+const BACKFILL_REASON_KEY = 'backfill_reason';
+
+// R2 の list の 1 ページ分。R2 側の上限が 1000 なのでそれに合わせる。
+//
+// 実測(2026-08-18、miniflare 上、1005 件を置いたバケット): include を付けない
+// list({ limit: 1000 }) は 1000 件返し、include: ['httpMetadata'] を付けると R2 が
+// レスポンス全体のデータ量で打ち切って 100 件に丸める(r2/list.ts の同じ実測と一致)。
+//
+// Ruling 20: 索引に書く contentType は contentTypeOf(key)(拡張子由来)なので
+// httpMetadata は要らない。include を付けないことがそのまま往復数 10 分の 1 になる。
+const BACKFILL_PAGE = 1000;
 
 // db.transaction() のコールバックが受け取る tx。Drizzle は型名を公開していないので
 // database 型から引き出す。
@@ -263,6 +286,138 @@ export class ObjectIndex extends SqliteStore {
       })),
       next,
     };
+  }
+
+  // 索引の現在の状態を返す。副作用は無い。運用の口(GET /buckets/:id/index/status)の出典。
+  //
+  // indexed は count()(索引の総行数)であって「今回のバックフィルが入れた件数」ではない。
+  // upsert が冪等なので 2 回目は 0 件更新でも索引は正しく、運用者が知りたいのは
+  // 「R2 の件数に追いついたか」だけである。
+  status(): BackfillStatus {
+    const state = this.#metaGet(BACKFILL_STATE_KEY);
+
+    switch (state) {
+      case 'running':
+        return { kind: 'running', indexed: this.count() };
+      case 'complete':
+        return { kind: 'complete', indexed: this.count() };
+      case 'failed':
+        return { kind: 'failed', indexed: this.count(), reason: this.#metaGet(BACKFILL_REASON_KEY) ?? 'unknown' };
+      default:
+        return { kind: 'idle' };
+    }
+  }
+
+  // 何度呼んでも安全。upsert が冪等なので、完了後に再実行しても行は増えず、
+  // 「R2 にあるが索引に無い」オブジェクトだけが増える。これが uploads/index.ts の
+  // multipart complete が約束している回復手段そのものである(同ファイルのコメント参照)。
+  //
+  // 走行中に呼ばれたらカーソルを先頭に戻して最初からやり直す。すでに入っている行を
+  // 舐め直すだけで害は無く、「取りこぼしを作らない」側に倒す。
+  //
+  // setAlarm は await する。同期メソッドにして void で捨てると、予約が失敗しても
+  // 気付けないまま running のまま止まる。
+  async startBackfill(bucketId: string): Promise<BackfillStatus> {
+    this.#metaSet(BACKFILL_BUCKET_ID_KEY, bucketId);
+    this.#metaClear(BACKFILL_CURSOR_KEY);
+    this.#metaClear(BACKFILL_REASON_KEY);
+    this.#metaSet(BACKFILL_STATE_KEY, 'running');
+    await this.ctx.storage.setAlarm(Date.now());
+
+    return this.status();
+  }
+
+  // alarm は at-least-once で配送され、ハンドラが失敗すると指数バックオフ(初回 2s)で
+  // 最大 6 回まで再実行される。6 回で尽きた後は何の記録も残らないので、**失敗は自分で
+  // 状態に記録して止める。**そうしないと「静かに途中で終わった索引」が残る。
+  //
+  // 1 回の alarm で 1 ページだけ処理し、続きがあれば次の alarm を予約する。10,000 件を
+  // 1 回の alarm に押し込まないためと、途中で落ちてもカーソル位置から再開できるため。
+  override async alarm(): Promise<void> {
+    const bucketId = this.#metaGet(BACKFILL_BUCKET_ID_KEY);
+    // startBackfill を経ずに alarm が起きることは無いが、at-least-once なので完了後に
+    // 重複配送されうる。予約の主体はこの DO 自身なので、出典が無ければ何もしない。
+    if (bucketId === undefined) return;
+
+    // alarm は消費エッジなので、ここで Result を畳んでよい。
+    return resolveBucket(this.env, bucketId).match(
+      async (bucket) => this.#indexPage(bucketId, bucket),
+      // バケット定義や binding が消えている場合。リトライしても回復しないので即座に止める。
+      async (error) => this.#markFailed(`${error.name}: ${error.message}`),
+    );
+  }
+
+  // 1 ページ分を索引に入れる。続きがあればカーソルを保存してから次の alarm を予約する。
+  // **カーソルを保存しないと毎回先頭 1000 件を舐め直して永久に終わらない。**
+  async #indexPage(bucketId: string, bucket: R2Bucket): Promise<void> {
+    const cursor = this.#metaGet(BACKFILL_CURSOR_KEY);
+
+    try {
+      // include: ['httpMetadata'] は付けない(Ruling 20。BACKFILL_PAGE のコメント参照)。
+      // prefix / delimiter も付けない。バックフィルはバケット全体を平坦に舐める。
+      //
+      // exactOptionalPropertyTypes 下では cursor: undefined を明示的に渡せないので、
+      // キー自体を spread の有無で作る(r2/list.ts の listOptionsOf と同じ書き方)。
+      const listed = await bucket.list({ limit: BACKFILL_PAGE, ...(cursor === undefined ? {} : { cursor }) });
+      for (const object of listed.objects) this.#indexObject(bucketId, object);
+
+      if (listed.truncated) {
+        this.#metaSet(BACKFILL_CURSOR_KEY, listed.cursor);
+        await this.ctx.storage.setAlarm(Date.now());
+
+        return;
+      }
+      this.#metaClear(BACKFILL_CURSOR_KEY);
+      this.#metaSet(BACKFILL_STATE_KEY, 'complete');
+    } catch (cause) {
+      this.#markFailed(cause instanceof Error ? `${cause.name}: ${cause.message}` : `${cause}`);
+    }
+  }
+
+  // Ruling 21: 0 バイトのフォルダマーカー(末尾 '/' のキー)も除外せず入れる。索引は
+  // R2 の現在状態を映すものであり、マーカーが R2 に実在する以上、索引に行があるのが
+  // 正しい。表示側は list(Ruling 14)と search(Ruling 15)が既に除外しているので
+  // 利用者には見えない。マーカーを入れると ancestorPrefixes 経由で prefixes 行も
+  // 作られるが、そのフォルダは実在するのでこれも正しい。
+  //
+  // 全フィールドが r2/list.ts の listObjects と同じ導出であること(Phase 0 との整合)。
+  // 特に contentType は同じ contentTypeOf(key) を通す(Ruling 16)。ここだけ
+  // httpMetadata を見ると、同じキーが indexed の有無で違う contentType を返す。
+  //
+  // name は upsert が keyPartsOf(key) から再計算するので渡した値は使われないが、
+  // ObjectDescriptor の必須フィールドなので同じ導出で埋める。
+  #indexObject(bucketId: string, object: R2Object): void {
+    this.upsert({
+      bucketId,
+      key: object.key,
+      name: keyPartsOf(object.key).name,
+      contentType: contentTypeOf(object.key),
+      size: object.size,
+      uploadedAt: object.uploaded.toISOString(),
+      etag: object.httpEtag,
+    });
+  }
+
+  #markFailed(reason: string): void {
+    this.#metaSet(BACKFILL_REASON_KEY, reason);
+    this.#metaSet(BACKFILL_STATE_KEY, 'failed');
+  }
+
+  // meta は BUCKET_ID_KEY と同居する。**必ずキー単位で触ること**(モジュール冒頭の
+  // BACKFILL_STATE_KEY のコメント参照)。
+  //
+  // meta.v は NULL 許容(schema.ts)なので、境界で undefined に寄せる。
+  #metaGet(k: string): string | undefined {
+    return this.db.select({ v: meta.v }).from(meta).where(eq(meta.k, k)).get()?.v ?? undefined;
+  }
+
+  #metaSet(k: string, v: string): void {
+    this.db.insert(meta).values({ k, v }).onConflictDoUpdate({ target: meta.k, set: { v } }).run();
+  }
+
+  // 「未設定」は NULL ではなく行の不在で表す。#metaGet の判定を 1 本にするため。
+  #metaClear(k: string): void {
+    this.db.delete(meta).where(eq(meta.k, k)).run();
   }
 
   // 1 バケット = 1 DO は idFromName(bucketId) を呼ぶ側の不変条件にすぎず、DO 自身は

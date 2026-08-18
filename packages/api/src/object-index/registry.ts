@@ -7,25 +7,17 @@ import type { ObjectIndex } from './index';
 import type { DriveError, ObjectDescriptor } from '@r2-drive/core';
 import type { Result } from 'neverthrow';
 
-// apps/web/src/worker.ts は ObjectIndex を値として import していない(spec §11.3、
-// @r2-drive/api を import してよいのは worker.ts だけという制約とは別に、DO クラスの
-// 実体は wrangler.jsonc の class_name 経由でしか結び付いていない)。そのため
-// wrangler types が生成する Env.OBJECT_INDEX は DurableObjectNamespace<undefined> にしか
-// 解決できず、.get() の戻り値も DurableObjectStub<undefined> になる。Task 10 で worker.ts
-// から ObjectIndex を export すれば cf-typegen の再生成だけで <ObjectIndex> に解決される
-// (テスト側は test/object-index-namespace.ts が同じ理由で 1 箇所にキャストを集約している)。
-// それまではここ 1 箇所にキャストを閉じる。
-const objectIndexNamespace = (env: Env): DurableObjectNamespace<ObjectIndex> => env.OBJECT_INDEX as DurableObjectNamespace<ObjectIndex>;
-
 // 1 バケット = 1 DO。idFromName に bucketId をそのまま渡すので、
 // バケットを足しても DO 側の設定は増えない。
+//
+// Env.OBJECT_INDEX は DurableObjectNamespace<ObjectIndex> に解決される。apps/web/src/worker.ts
+// が ObjectIndex を再輸出したことで wrangler types が実クラスを引けるようになったため
+// (Task 10)、Task 1 から引きずっていたキャストはここから消えている。
 export const resolveObjectIndex = (env: Env, id: string): Result<DurableObjectStub<ObjectIndex>, BucketNotFoundError> => {
   const descriptor = bucketDescriptors.find((d) => d.id === id);
   if (descriptor === undefined) return err(new BucketNotFoundError(id));
 
-  const namespace = objectIndexNamespace(env);
-
-  return ok(namespace.get(namespace.idFromName(descriptor.id)));
+  return ok(env.OBJECT_INDEX.get(env.OBJECT_INDEX.idFromName(descriptor.id)));
 };
 
 // 索引を担当するバケットかどうか。deploy 時の設定なので同期で判定できる。

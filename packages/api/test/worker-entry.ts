@@ -2,7 +2,7 @@ import { eq } from 'drizzle-orm';
 
 import { api } from '../src/index';
 import { ObjectIndex } from '../src/object-index/index';
-import { objects, prefixes } from '../src/object-index/schema';
+import { meta, objects, prefixes } from '../src/object-index/schema';
 
 type ObjectRow = typeof objects.$inferSelect;
 type PrefixRow = typeof prefixes.$inferSelect;
@@ -28,6 +28,13 @@ export class ObjectIndexUnderTest extends ObjectIndex {
   // この列で親を引くので、ここで検算できる形にしておく。
   debugPrefixes(): readonly PrefixRow[] {
     return this.db.select().from(prefixes).orderBy(prefixes.prefix).all();
+  }
+
+  // meta 表を覗く窓。bucket_id(Ruling 11 の誤ルーティング検出)とバックフィルの
+  // backfill_* が同居する表なので、「バックフィルが bucket_id を巻き添えに消していないか」
+  // を直接見るために使う。
+  debugMeta(k: string): string | undefined {
+    return this.db.select({ v: meta.v }).from(meta).where(eq(meta.k, k)).get()?.v ?? undefined;
   }
 
   // FTS5 の仮想テーブルは Drizzle で表現できないので raw SQL で覗く。

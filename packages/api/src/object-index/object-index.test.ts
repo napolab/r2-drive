@@ -1,6 +1,10 @@
+import { env } from 'cloudflare:test';
 import { describe, expect, it } from 'vitest';
 
 import { objectIndexNamespace } from '../../test/object-index-namespace';
+import { waitForBackfill } from '../../test/wait-for-backfill';
+
+import { BUCKET_ID_KEY } from './index';
 
 import type { ObjectDescriptor } from '@r2-drive/core';
 
@@ -444,5 +448,140 @@ describe('ObjectIndex の検索', () => {
     const page = await stub.search({ bucketId: 'photos', query: 'docs', cursor: undefined, limit: 10 });
 
     expect(page.objects.map((o) => o.key)).toEqual(['docs/design.md']);
+  });
+});
+
+// R2 が真実であり、索引は後付けの読み取り加速層である。バックフィルはその 2 つを
+// 突き合わせて索引を R2 の現在状態に寄せる唯一の手段であり、
+// packages/api/src/uploads/index.ts の multipart complete が「索引書き込みに失敗しても
+// R2 は巻き戻さない」と決めたときに約束した回復手段そのものである。
+//
+// したがって固定すべき契約は 3 つある:
+//   1. 何度実行しても行が増えない
+//   2. 途中で止めて再実行すると続きから進み、最終的に全件揃う
+//      → ページ境界(1000 件)を踏む必要があるので test/backfill-pagination.integration.test.ts
+//   3. 「R2 にあるが索引に無い」オブジェクトを拾える
+//
+// このファイルの R2(BUCKET_PHOTOS)は以下のテストが共有する(vitest-pool-workers の
+// ストレージ分離はファイル単位)。バックフィルはバケット全体を舐めるので、件数の
+// 絶対値に依存する検証は書かず、特定の行の有無か「R2 の実件数と一致すること」で見る。
+describe('ObjectIndex のバックフィル', () => {
+  // アップロード API を経由しないので索引には入らない。「R2 にあるが索引に無い」状態の作り方。
+  const putDirectly = async (key: string, contentType: string): Promise<void> => {
+    await env.BUCKET_PHOTOS.put(key, 'x', { httpMetadata: { contentType } });
+  };
+
+  it('一度も走っていなければ idle', async () => {
+    await expect(stubFor('backfill-idle').status()).resolves.toEqual({ kind: 'idle' });
+  });
+
+  it('R2 の中身を全部取り込んで complete になる', async () => {
+    for (const key of ['bf/1.txt', 'bf/2.txt', 'bf/a/3.txt']) await putDirectly(key, 'text/plain');
+    const stub = stubFor('backfill-run');
+
+    await stub.startBackfill('photos');
+    await waitForBackfill(stub);
+
+    const listed = await env.BUCKET_PHOTOS.list({ limit: 1000 });
+    expect(listed.truncated).toBe(false);
+    await expect(stub.status()).resolves.toEqual({ kind: 'complete', indexed: listed.objects.length });
+    await expect(stub.debugRow('bf/a/3.txt')).resolves.toMatchObject({ name: '3.txt', parentPrefix: 'bf/a/' });
+  });
+
+  // 契約 3。uploads/index.ts の multipart complete が「uploadId を消費済みで
+  // リトライが効かない」と言っている失敗モードの回復そのもの。
+  it('R2 にあるが索引に無いオブジェクトを拾う', async () => {
+    const stub = stubFor('backfill-orphan');
+    await stub.upsert(descriptorOf('bf-orphan/known.txt'));
+    await putDirectly('bf-orphan/lost.txt', 'text/plain');
+    await expect(stub.debugRow('bf-orphan/lost.txt')).resolves.toBeUndefined();
+
+    await stub.startBackfill('photos');
+    await waitForBackfill(stub);
+
+    await expect(stub.debugRow('bf-orphan/lost.txt')).resolves.toMatchObject({ name: 'lost.txt', parentPrefix: 'bf-orphan/' });
+  });
+
+  // 契約 1。upsert の冪等性にそのまま乗る。
+  it('2 回実行しても行が増えない', async () => {
+    await putDirectly('bf-idem/1.txt', 'text/plain');
+    const stub = stubFor('backfill-idempotent');
+
+    await stub.startBackfill('photos');
+    await waitForBackfill(stub);
+    const first = await stub.count();
+
+    await stub.startBackfill('photos');
+    await waitForBackfill(stub);
+
+    await expect(stub.count()).resolves.toBe(first);
+    await expect(stub.status()).resolves.toEqual({ kind: 'complete', indexed: first });
+  });
+
+  // startBackfill は meta に backfill_* を書くが、bucket_id(Ruling 11 の誤ルーティング
+  // 検出)を巻き添えにしてはいけない。meta を一括クリアする実装だと guard が静かに
+  // 無効化され、別バケット向けの upsert が通ってしまう。
+  //
+  // **空のバケットで検証すること。**中身のあるバケットで試すと、バックフィル自身の
+  // upsert が bucket_id を焼き直すため、meta を一括クリアする実装でも guard が復活して
+  // しまい変異を検出できない(実測で確認済み)。BUCKET_MEDIA はこのファイルの他の
+  // テストが一切触らないので空である。その前提自体もここで張る。
+  it('バックフィルは meta.bucket_id を壊さない', async () => {
+    const media = await env.BUCKET_MEDIA.list();
+    expect(media.objects).toEqual([]);
+    const stub = stubFor('backfill-meta-bucket-id');
+    await stub.upsert(descriptorOf('bf-guard/a.txt', { bucketId: 'media' }));
+
+    await stub.startBackfill('media');
+    await waitForBackfill(stub);
+
+    await expect(stub.debugMeta(BUCKET_ID_KEY)).resolves.toBe('media');
+    await expect(async () => stub.upsert(descriptorOf('bf-guard/b.txt', { bucketId: 'photos' }))).rejects.toThrow(/bound to bucket "media" but received "photos"/);
+  });
+
+  // Ruling 20 / Ruling 16: 索引に書く contentType は R2 の httpMetadata ではなく
+  // r2/list.ts の contentTypeOf(key)(拡張子由来)から取る。R2 一覧経路と同じ関数を
+  // 通すことで、indexed の有無で同じキーの contentType が変わらないようにする。
+  //
+  // 拡張子(.txt → text/plain)と httpMetadata(image/jpeg)をわざと食い違わせている。
+  // httpMetadata を見る実装に戻すと、include を付ければ image/jpeg、include 無しなら
+  // undefined → application/octet-stream になり、どちらでもこの行が落ちる。
+  it('索引に書く contentType は httpMetadata ではなく拡張子由来', async () => {
+    await putDirectly('bf-ct/note.txt', 'image/jpeg');
+    const stub = stubFor('backfill-content-type');
+
+    await stub.startBackfill('photos');
+    await waitForBackfill(stub);
+
+    await expect(stub.debugRow('bf-ct/note.txt')).resolves.toMatchObject({ contentType: 'text/plain' });
+  });
+
+  // Ruling 21: 0 バイトのフォルダマーカーも除外せず upsert する。R2 にマーカーが実在する
+  // 以上、索引も R2 の現在状態を映すべきである。表示側は list(Ruling 14)が既に除外
+  // しているので利用者には見えない。マーカー由来の prefixes 行が作られるのも正しい
+  // (そのフォルダは実在する)。
+  it('0 バイトのフォルダマーカーも索引に入り、一覧からは除外される', async () => {
+    await putDirectly('bf-marker/', 'application/octet-stream');
+    await putDirectly('bf-marker/a.txt', 'text/plain');
+    const stub = stubFor('backfill-marker');
+
+    await stub.startBackfill('photos');
+    await waitForBackfill(stub);
+
+    await expect(stub.debugRow('bf-marker/')).resolves.toMatchObject({ name: '', parentPrefix: 'bf-marker/' });
+    const page = await stub.list({ bucketId: 'photos', prefix: 'bf-marker/', cursor: undefined, limit: 10 });
+    expect(page.objects.map((o) => o.key)).toEqual(['bf-marker/a.txt']);
+  });
+
+  // 組み込みの alarm リトライは指数バックオフで 6 回、その後は何も残らずに消える。
+  // 回復不能な失敗(バケット定義が消えている等)を例外で投げっぱなしにすると、
+  // 6 回無駄に走った末に「静かに途中で終わった索引」だけが残る。状態に記録して止める。
+  it('存在しないバケットは failed になり alarm を再予約しない', async () => {
+    const stub = stubFor('backfill-unknown-bucket');
+
+    await stub.startBackfill('nope');
+    await waitForBackfill(stub);
+
+    await expect(stub.status()).resolves.toMatchObject({ kind: 'failed', reason: expect.stringContaining('nope') });
   });
 });

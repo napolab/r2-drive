@@ -13,6 +13,7 @@ import { parseRangeHeader, resolveContentRange } from '../r2/range';
 import { bucketDescriptors, resolveBucket } from '../r2/registry';
 
 import type { HonoEnv } from '../env';
+import type { BackfillStatus } from '../object-index/status';
 import type { DriveError, ObjectPage } from '@r2-drive/core';
 
 const listQuery = z.object({ prefix: z.string().default(''), cursor: z.string().optional() });
@@ -76,6 +77,39 @@ export const buckets = new Hono<HonoEnv>()
       )
       .match(
         (page) => c.json(page, 200),
+        (error) => toErrorResponse(c, error),
+      );
+  })
+  // 運用の口。索引を後から有効化する / R2 に直接置かれたオブジェクトを取り込む /
+  // uploads/index.ts の multipart complete が取りこぼした分を回復する、いずれも
+  // この 2 本で行う。バックフィルは冪等なので、迷ったら叩いてよい。
+  //
+  // **indexed: true への切り替えはここから行わない。**索引を信じるかどうかは deploy 時の
+  // 設定(r2/registry.ts の bucketDescriptors.indexed)であり、実行時に書き換えられる
+  // ようにすると「deploy 時の設定である」という前提が崩れる。運用手順は
+  // 「backfill を叩く → status が complete になるのを確認する → registry を書き換えて再デプロイ」。
+  //
+  // 'index' は 2 番目のセグメントが literal なので '/:bucketId/objects'(完全一致)や
+  // '/:bucketId/content/:path{.+}'(2 番目が 'content')とは衝突しないが、splat を持つ
+  // ルートより前に置いて順序に依存しない形にしておく。
+  .post('/:bucketId/index/backfill', async (c) => {
+    const bucketId = c.req.param('bucketId');
+
+    return resolveObjectIndex(c.env, bucketId)
+      .asyncAndThen((stub) => ResultAsync.fromPromise<BackfillStatus, DriveError>(stub.startBackfill(bucketId), (cause) => new R2OperationError(`backfill start failed: ${bucketId}`, { cause })))
+      .match(
+        // 202。受け付けて alarm を予約しただけで、走り切ってはいない。進捗は status を見る。
+        (status) => c.json(status, 202),
+        (error) => toErrorResponse(c, error),
+      );
+  })
+  .get('/:bucketId/index/status', async (c) => {
+    const bucketId = c.req.param('bucketId');
+
+    return resolveObjectIndex(c.env, bucketId)
+      .asyncAndThen((stub) => ResultAsync.fromPromise<BackfillStatus, DriveError>(stub.status(), (cause) => new R2OperationError(`backfill status failed: ${bucketId}`, { cause })))
+      .match(
+        (status) => c.json(status, 200),
         (error) => toErrorResponse(c, error),
       );
   })

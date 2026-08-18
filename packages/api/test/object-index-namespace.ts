@@ -2,12 +2,13 @@ import { env } from 'cloudflare:test';
 
 import type { ObjectIndexUnderTest } from './worker-entry';
 
-// apps/web/worker-configuration.d.ts の OBJECT_INDEX は、実クラスが本番 Worker
-// エントリ(apps/web/src/worker.ts)にまだ無いため wrangler types が
-// `DurableObjectNamespace<undefined>` にしか解決できない。Task 10 で実クラスが
-// worker.ts に載れば `cf-typegen` の再生成だけで <ObjectIndex> に解決される。
-// この形は複数のテストファイルで必要になるため、ここ 1 箇所に寄せる。
+// Env.OBJECT_INDEX は DurableObjectNamespace<ObjectIndex> に解決される(Task 10 で
+// apps/web/src/worker.ts が ObjectIndex を再輸出したため)。本番の binding が指すのは
+// ObjectIndex だが、テストが実体化するのは覗き見用メソッドを足したサブクラスなので
+// (vitest.config.ts の durableObjects.className = 'ObjectIndexUnderTest'、Ruling 10)、
+// ここでサブクラスへ narrow する。
 //
-// テストが実体化するのは覗き見用メソッドを足したサブクラス(Ruling 10)なので、
-// キャスト先も ObjectIndexUnderTest である。本番の binding は ObjectIndex を指す。
+// **このキャストは production 側の型不足ではなく、テスト構成そのものに由来する。**
+// 本番の型定義は ObjectIndex しか知らないし、知る必要も無い。この形は複数のテスト
+// ファイルで必要になるため、ここ 1 箇所に寄せる。
 export const objectIndexNamespace = env.OBJECT_INDEX as DurableObjectNamespace<ObjectIndexUnderTest>;
