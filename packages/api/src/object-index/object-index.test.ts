@@ -1,10 +1,10 @@
-import { env } from 'cloudflare:test';
+import { env, runInDurableObject } from 'cloudflare:test';
 import { describe, expect, it } from 'vitest';
 
 import { objectIndexNamespace } from '../../test/object-index-namespace';
 import { waitForBackfill } from '../../test/wait-for-backfill';
 
-import { BUCKET_ID_KEY } from './index';
+import { BACKFILL_PAGES_KEY, BUCKET_ID_KEY } from './index';
 
 import type { ObjectDescriptor } from '@r2-drive/core';
 
@@ -583,5 +583,48 @@ describe('ObjectIndex のバックフィル', () => {
     await waitForBackfill(stub);
 
     await expect(stub.status()).resolves.toMatchObject({ kind: 'failed', reason: expect.stringContaining('nope') });
+    // 「止める」側を実際に張る。予約が残っていると 6 回のリトライを無駄に消費した末に
+    // 何の記録も残さず消える。
+    await expect(stub.debugAlarm()).resolves.toBeNull();
+  });
+
+  // 運用手順「status を見る → 原因を直す → backfill を叩き直す」を固定する。
+  // 運用の口の存在意義そのものなので、実装が偶然そうなっているだけの状態にしない。
+  it('failed から叩き直すと complete まで復帰する', async () => {
+    await putDirectly('bf-recover/1.txt', 'text/plain');
+    const stub = stubFor('backfill-recover');
+
+    await stub.startBackfill('nope');
+    await waitForBackfill(stub);
+    await expect(stub.status()).resolves.toMatchObject({ kind: 'failed' });
+
+    await stub.startBackfill('photos');
+    await waitForBackfill(stub);
+
+    await expect(stub.status()).resolves.toMatchObject({ kind: 'complete' });
+    await expect(stub.debugRow('bf-recover/1.txt')).resolves.toMatchObject({ name: '1.txt', parentPrefix: 'bf-recover/' });
+  });
+
+  // alarm は at-least-once。complete に着いた後の迷い alarm がバケット全体を再スキャン
+  // したり、状態を書き換えたりしてはいけない(failed を complete に上書きすると
+  // 「索引を信じてよいか」の判断を誤る)。
+  //
+  // backfill_bucket_id は完了後も残るので、「出典があるか」では弾けない。状態で弾く。
+  // 行数は upsert が冪等なので再スキャンしても増えない — **ページ数だけが再スキャンを
+  // 検出できる**。ガードを消すとここが 1 から 2 に増えて落ちる。
+  it('complete 後に迷い alarm が来ても状態・行数・ページ数が動かない', async () => {
+    await putDirectly('bf-stray/1.txt', 'text/plain');
+    const stub = stubFor('backfill-stray-alarm');
+    await stub.startBackfill('photos');
+    await waitForBackfill(stub);
+    const status = await stub.status();
+    const count = await stub.count();
+    const pages = await stub.debugMeta(BACKFILL_PAGES_KEY);
+
+    await runInDurableObject(stub, async (instance) => instance.alarm());
+
+    await expect(stub.status()).resolves.toEqual(status);
+    await expect(stub.count()).resolves.toBe(count);
+    await expect(stub.debugMeta(BACKFILL_PAGES_KEY)).resolves.toBe(pages);
   });
 });

@@ -1,6 +1,8 @@
 import { env } from 'cloudflare:test';
 import { expect, it } from 'vitest';
 
+import { BACKFILL_PAGES_KEY } from '../src/object-index/index';
+
 import { objectIndexNamespace } from './object-index-namespace';
 import { waitForBackfill } from './wait-for-backfill';
 
@@ -37,4 +39,12 @@ it('1 ページを超えるバケットをカーソルで継いで全件取り�
   await expect(stub.status()).resolves.toEqual({ kind: 'complete', indexed: TOTAL });
   // 2 ページ目の先頭。1 ページ目だけで終わる実装だとこの行が存在しない。
   await expect(stub.debugRow('page/01000.txt')).resolves.toMatchObject({ name: '01000.txt', parentPrefix: 'page/' });
+
+  // **Ruling 20 の「include を付けない」を張る唯一の場所。**1001 件が 2 ページで
+  // 収まったということは 1 ページ 1000 件だったということである。
+  // include: ['httpMetadata'] を付け直すと 1 ページ 100 件に丸められて 11 ページになる。
+  // 速度にしか現れない退行なので、テスト時間でもタイムアウトでも検出できない
+  // (レビューで実測: include ありでも 153 tests 全部 pass、実行時間はむしろ短く出た)。
+  // 最終状態に残るページ数だけが決定的に捕まえられる。
+  await expect(stub.debugMeta(BACKFILL_PAGES_KEY)).resolves.toBe('2');
 }, 60_000);

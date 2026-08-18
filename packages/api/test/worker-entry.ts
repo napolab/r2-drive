@@ -37,6 +37,14 @@ export class ObjectIndexUnderTest extends ObjectIndex {
     return this.db.select({ v: meta.v }).from(meta).where(eq(meta.k, k)).get()?.v ?? undefined;
   }
 
+  // 予約済み alarm の時刻。未予約なら null。「回復不能な失敗は状態に記録して止める」の
+  // 「止める」側 — つまり次の alarm を予約していないこと — を実際に張るための窓。
+  // これが無いと「failed になる」しか検証できず、テスト名が主張する「再予約しない」が
+  // 空手形になる。
+  async debugAlarm(): Promise<number | null> {
+    return this.ctx.storage.getAlarm();
+  }
+
   // FTS5 の仮想テーブルは Drizzle で表現できないので raw SQL で覗く。
   // 「upsert したら引ける / remove したら引けない」を張るための読み取り専用の窓。
   debugFtsKeys(): readonly string[] {

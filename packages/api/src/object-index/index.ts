@@ -24,6 +24,14 @@ const BACKFILL_CURSOR_KEY = 'backfill_cursor';
 const BACKFILL_BUCKET_ID_KEY = 'backfill_bucket_id';
 const BACKFILL_REASON_KEY = 'backfill_reason';
 
+// 処理したページ数。運用上の意味は「何往復かかったか」だが、主目的は Ruling 20 の
+// 計器である。「include: ['httpMetadata'] を付けない = 1 ページ 1000 件」は速度にしか
+// 現れないため、テストからは最終状態に痕跡が残らないと張れない(alarm は自動発火する
+// ので途中経過は決定的に観測できない。test/wait-for-backfill.ts の実測参照)。
+// ページ数なら最終状態として残るので競合しない。include を付け直すと同じデータで
+// ページ数が 10 倍に跳ね、BACKFILL_PAGE を縮めても跳ねる。
+export const BACKFILL_PAGES_KEY = 'backfill_pages';
+
 // R2 の list の 1 ページ分。R2 側の上限が 1000 なのでそれに合わせる。
 //
 // 実測(2026-08-18、miniflare 上、1005 件を置いたバケット): include を付けない
@@ -317,10 +325,19 @@ export class ObjectIndex extends SqliteStore {
   //
   // setAlarm は await する。同期メソッドにして void で捨てると、予約が失敗しても
   // 気付けないまま running のまま止まる。
+  //
+  // Ruling 22: 戻り値は「遷移の結果としての状態」であって別クエリではない。
+  // .claude/rules/design-principles.md の CQS からの意図的な逸脱であり、理由は
+  // 202 Accepted のボディをそのまま返すのに DO への往復を 2 回にしないため。
+  // query 側(status())は純粋なままに保つこと。
+  //
+  // failed からもここで復帰する。reason を消して running に戻すだけでよい
+  // (原因を直してから叩き直す、が運用手順)。
   async startBackfill(bucketId: string): Promise<BackfillStatus> {
     this.#metaSet(BACKFILL_BUCKET_ID_KEY, bucketId);
     this.#metaClear(BACKFILL_CURSOR_KEY);
     this.#metaClear(BACKFILL_REASON_KEY);
+    this.#metaSet(BACKFILL_PAGES_KEY, '0');
     this.#metaSet(BACKFILL_STATE_KEY, 'running');
     await this.ctx.storage.setAlarm(Date.now());
 
@@ -334,9 +351,19 @@ export class ObjectIndex extends SqliteStore {
   // 1 回の alarm で 1 ページだけ処理し、続きがあれば次の alarm を予約する。10,000 件を
   // 1 回の alarm に押し込まないためと、途中で落ちてもカーソル位置から再開できるため。
   override async alarm(): Promise<void> {
+    // **状態で弾くこと。**backfill_bucket_id は complete / failed の後も消さない
+    // (どのバケットを索引したかの記録として意味があり、次の startBackfill が上書きする)
+    // ので、「出典があるか」では迷い alarm を弾けない。
+    //
+    // 弾かないと 2 つ壊れる: (1) 終わったバックフィルがバケット全体を無駄に再スキャンする、
+    // (2) **failed が静かに complete へ上書きされうる。**後者は「索引を信じてよいか」の
+    // 判断を誤らせるので深刻である(indexed: true への切り替えは status を見て決める)。
+    //
+    // startBackfill は setAlarm より前に running を書くので、この順序は安全である。
+    if (this.#metaGet(BACKFILL_STATE_KEY) !== 'running') return;
+
     const bucketId = this.#metaGet(BACKFILL_BUCKET_ID_KEY);
-    // startBackfill を経ずに alarm が起きることは無いが、at-least-once なので完了後に
-    // 重複配送されうる。予約の主体はこの DO 自身なので、出典が無ければ何もしない。
+    // running なら startBackfill が必ず書いている。型の都合で残す guard。
     if (bucketId === undefined) return;
 
     // alarm は消費エッジなので、ここで Result を畳んでよい。
@@ -360,6 +387,7 @@ export class ObjectIndex extends SqliteStore {
       // キー自体を spread の有無で作る(r2/list.ts の listOptionsOf と同じ書き方)。
       const listed = await bucket.list({ limit: BACKFILL_PAGE, ...(cursor === undefined ? {} : { cursor }) });
       for (const object of listed.objects) this.#indexObject(bucketId, object);
+      this.#bumpPages();
 
       if (listed.truncated) {
         this.#metaSet(BACKFILL_CURSOR_KEY, listed.cursor);
@@ -396,6 +424,11 @@ export class ObjectIndex extends SqliteStore {
       uploadedAt: object.uploaded.toISOString(),
       etag: object.httpEtag,
     });
+  }
+
+  // 1 ページ処理するたびに +1。BACKFILL_PAGES_KEY のコメント参照。
+  #bumpPages(): void {
+    this.#metaSet(BACKFILL_PAGES_KEY, `${parseInt(this.#metaGet(BACKFILL_PAGES_KEY) ?? '0', 10) + 1}`);
   }
 
   #markFailed(reason: string): void {
