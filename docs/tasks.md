@@ -64,54 +64,133 @@
       「O(n) の作り直し」は計測から導いた**推論であって、実装を読んで確かめてはいない**
 - [ ] **画像プレビューの初回コストは残っている。**再訪はキャッシュで消えたが、
       初回は依然 15 秒のスクロールで 196 MB。142px 四方に 1280x960 を配っているため。
-      **派生サムネイル(Phase 1 の `ObjectHook` の実装 1 つ)で 1/60 になる**
+      **派生サムネイルで 1/60 になる。**Phase 1 では意図的に外した(Phase 1 spec §9)
 
 ---
 
-## Phase 1 — D1 索引
+## Phase 1 — オブジェクト索引と検索
 
-### なぜやるか
+**設計は [`docs/superpowers/specs/2026-08-17-r2-drive-phase-1-design.md`](./superpowers/specs/2026-08-17-r2-drive-phase-1-design.md)。**
+以下はそこから実行できる粒度に落としたものだけ。判断の根拠は spec を読むこと。
 
-痛点の残り 3 つが、すべて `R2.list()` の構造的限界に由来する(spec §1)。
+### 前提が 2 つ変わった
 
-| 痛点 | 原因 |
-|---|---|
-| 1 フォルダ 1000 件超で一覧が遅い | `R2.list()` はカーソル走査しかできない |
-| 検索が使い物にならない | `R2.list()` に検索が無い |
-| サムネイルが無い | 派生ファイルの索引が無い |
+Phase 0 spec は Phase 1 を「D1 索引」「`ObjectHook` を導入」と書いていたが、**どちらも変更した。**
 
-**R2 が真実であるという原則は崩さない。**索引はあくまで後付けのキャッシュ層で、
-壊れてもバックフィル中でも一覧は出続けること(下記 `ObjectSource` を参照)。
+| | Phase 0 spec | Phase 1 spec |
+|---|---|---|
+| 索引の基盤 | D1 | **Durable Object の SQLite**(1 バケット = 1 DO) |
+| `ObjectHook` | Phase 1 で導入 | **導入しない**(実装が 1 つになるため) |
 
-### 拡張点をここで 2 つ導入する
+追加 binding は **`OBJECT_INDEX` の 1 つだけ**。新しい抽象はゼロ。`ObjectDescriptor` のワイヤ型も変わらない。
 
-Phase 0 で作らなかったのは、実装が 0 個または 1 個だったからである。Phase 1 で
-**2 つ目が同時に登場する**ので、ここで初めて正当化される(spec §5.2)。
+### 実装は完了した(2026-08-18)
 
-- [ ] **`ObjectHook`(アップロード後処理)** — 実装は「索引書き込み」と「サムネイル生成」の 2 つ
-  - [ ] `hookable` を使うか自作するか決める(spec §14 の未決事項)。
-        Phase 0 で不採用にした判断を、実装 2 つを前にして再評価する
-  - [ ] ディスパッチは `packages/core/src/create-runner.ts` を共有する。
-        新しいディスパッチ形を発明しない
-- [ ] **`ObjectSource`(一覧のデータ供給元)** — 実装は 2 つ
-  - [ ] `indexedSource` — 索引済みバケットだけ `ok` を返す
-  - [ ] `r2ListSource` — 常に `ok`。索引が無い / 追いついていないバケットの受け皿
-  - [ ] registry の順序は `[indexedSource, r2ListSource]`。**フォールバックは必ず最後**
-  - [ ] 索引を意図的に壊した状態で一覧が出ることをテストで固定する
+**実測と受け入れ基準 7 件の判定は [`reports/2026-08-18-phase-1-index-perf.md`](../reports/2026-08-18-phase-1-index-perf.md)。**
+`photos` は `indexed: true` に切り替え済み。`media` は R2 経路の対照として `indexed: false` のまま残してある。
 
-### 索引そのもの
+一覧の 1 ページ目(10,000 件のフォルダ)は **17.69 ms → 7.35 ms(約 2 倍)。**
+バックフィルは 10,000 件を 10 ページ・約 5 秒で取り切る。**7 件すべて満たした**が、
+基準 2(検索)と基準 6(バックフィル)には数字の意味を狭める注記がある。レポートを読むこと。
 
-- [ ] D1 のスキーマを決める(key / size / contentType / uploadedAt / etag / 幅・高さ・尺)
-- [ ] **FTS5 で全文検索を張る。**spec §5 いわく、これだけで検索要求の大半が満たせる可能性がある。
-      **Phase 5(Vectorize 意味検索)の要否は、これを実際に使ってから判断する**
-- [ ] 既存バケットのバックフィル経路を作る。途中で失敗しても再実行できること
-- [ ] **`MediaFacts` は variant で入れる。**`width?` / `height?` / `duration?` の
-      3 つの optional を生やさない。それは 3 つの optional ではなく 1 つの状態である
-      (`.claude/rules` の「optional field を作らない」/ spec §5.6)
+### 別環境でこのブランチを deploy する前に
 
-```ts
-// Phase 1 で追加: ObjectDescriptor & { readonly media: MediaFacts }
-```
+`apps/web/wrangler.jsonc` は `.gitignore` 済みなので、既存の `wrangler.jsonc` を持っている人が
+このブランチとの差分(DO の binding)に自分では気付けない(最終レビュー I2)。
+[`reports/2026-08-18-phase-1-index-perf.md`](../reports/2026-08-18-phase-1-index-perf.md) の
+「切り替えの手順」の **0 番目**として明記した:
+
+> 0. `apps/web/wrangler.jsonc.example` の `durable_objects` と `migrations` の 2 ブロックを、
+>    自分の `apps/web/wrangler.jsonc` に手で写す。索引の実体である DO の binding がここに無いと
+>    バックフィル(手順 1)自体が起動しない
+
+### 着手前に潰す(実装計画の最初の 2 つ)
+
+- [x] **DO SQLite で FTS5 が使えることを実測で確かめる。**falsy なら検索の設計だけ組み直す
+      → 使える(`packages/api/test/fts5-availability.test.ts`)
+- [x] **Drizzle の `await` 連鎖で write coalescing が保たれるかを確かめる。**
+      → **保たれない。**連続した `sql.exec` は失敗した文の直前までを巻き戻さないことを対照実験で確認し
+      (`packages/api/test/sql-exec-atomicity.test.ts`)、`db.transaction()` で明示的に囲う形にした
+
+### DO と索引
+
+- [x] `SqliteStore`(基底)→ `ObjectIndex` の継承構成。**RPC は prototype chain を見るので
+      継承メソッドも公開される。**arrow property で書くと stub から呼べなくなる
+- [x] スキーマ 4 表(`objects` / `prefixes` / `objects_fts` / `meta`)。`bucket_id` 列は持たない
+- [x] `worker.ts` が `export { ObjectIndex } from '@r2-drive/api'` で再輸出する
+- [x] **FTS5 は upsert と同じ書き込み経路で明示的に更新する。**更新漏れはテストで封じる
+
+### 経路
+
+- [x] アップロード / 削除の後に `stub.upsert()` / `stub.remove()` を await する
+- [x] `indexedSource` を registry の先頭に足す。判定は `bucketDescriptors.indexed`(**deploy 時の設定**)
+- [x] `GET /buckets/:id/search?q` を足す。戻りは既存の `ObjectPage`
+- [x] バックフィル: `alarm()` が R2 を 1,000 件ずつ舐めてカーソルを `meta` に置く。冪等であること
+- [x] 起動 `POST /buckets/:id/index/backfill` と観測 `GET /buckets/:id/index/status`
+- [x] **索引が返す cursor に経路タグを付ける(Ruling 18)。**`indexed: false → true` の切り替え
+      deploy を跨いだ R2 の opaque cursor が索引経路に渡ると、**エラーにならず静かに
+      1 ページ目を返し続ける。**`k1:` / `q1:` のタグで検出して 412 にする
+- [x] **逆向きも塞ぐ(Ruling 23)。**索引のタグ付き cursor を R2 経路へ渡したとき、
+      **R2 は弾かず空ページ + `truncated: false` を返す**(実測)。つまり一覧が静かに
+      「ここで終わり」になる。`r2ListSource` にも `isIndexCursor` のガードを足した。
+      **`indexed: false` のバケットでも踏める**(検索は indexed に関わらず索引 DO を通るため)
+
+### Phase 1 から持ち越したもの
+
+- [ ] **`ErrorName` に `'ForeignCursorError'` を足して 400 で返す。**今は `packages/core` を
+      触らない制約のため `PreconditionFailedError`(412)に載せている。
+      **先送りできない期限がある: ETag / 条件付きアップロード(`If-Match`)を入れると
+      名前が衝突する。**412 は本来 `If-Match` 不一致(= オブジェクトが他人に書き換えられた)の
+      status であり、そちらを実装した瞬間、クライアントは同じ `name` を受け取って
+      **「cursor を捨てて 1 ページ目から取り直す」と「オブジェクトが変わったので再取得する」を
+      区別できなくなる。**回復動作が正反対なので、片方を実装するなら先に名前を分けること
+- [ ] **クライアントが foreign cursor(412)から自動回復しない。**
+      `apps/web/src/queries/objects.ts` の `queryFn` は `.match` でエラーを throw するだけなので、
+      **`indexed: false → true` の切り替え deploy の瞬間にスクロール中だったユーザーは
+      エラー画面を見る**(リロードで回復する)。正しい振る舞いは「cursor を捨てて
+      1 ページ目から取り直す」。**上の `ErrorName` の分離が前提**である
+      (`PreconditionFailedError` のままだと ETag の 412 と区別できず、誤って一覧を巻き戻す)
+- [ ] **日本語検索の中間一致。**FTS5 の既定 tokenizer は連続する CJK を 1 トークンにするため、
+      `休暇の写真.jpg` は `休暇` では引けるが `写真`(末尾)/ `暇の写`(中間)では引けない。
+      **Vectorize(Phase 5)より先に bigram トークン化を試す価値がある**(レポートの「検索」節)
+- [ ] **バックフィル中は同じ DO への読み取りが最大 3.2 秒ブロックされる。**10,000 件では
+      運用手順(`indexed: false` のままバックフィル → complete 確認 → `true` にして再デプロイ)で
+      避けられるが、**100,000 件規模ではバッチ upsert を検討すること**
+- [ ] **I3: バックフィル × delete / upload の競合(次フェーズ冒頭で拾う)。**`#indexPage` の
+      `await bucket.list()` が返すスナップショットは呼び出し時点の R2 の状態であり、その
+      **窓の間に delete が来ると、消えたはずのキーを upsert し直してしまう。**結果、
+      R2 には無いのに索引には残る行(一覧に出るが開けない幽霊)ができる。upload との競合では
+      古い etag / size が索引に焼き付く。**次のバックフィルまで自己修復しない。**
+      テストは `bucket.list` をスタブして窓を作れば書ける
+- [ ] **M3: フォルダの返し方が 2 経路で違う(実害は今のところ無い、テスト化されていない)。**
+      索引経路は `#foldersOf` が 1 ページ目で全フォルダを出し切るが、R2 経路
+      (`delimitedPrefixes`)はページごとに小出しにする。**最終的な和集合は同じなので実害は無いが、
+      この差分をテストで固定していない。**フォルダ数が多いバケットで気付かれる可能性がある
+- [ ] **M4: `/search` は `indexed: false` のバケットでも 200 で部分的な結果を返す。**
+      バックフィル前は「API 経由でアップロードした分だけ」がヒットする。**この振る舞いは
+      「沈黙して間違うのが最悪の失敗モード」というこのブランチの原則から見ると例外である。**
+      現状 `apps/web` は `/search` を呼んでいないので実害はゼロだが、**UI を繋ぐ前に
+      「`isIndexed` でゲートする」か「status を結果に含めて部分的であることを伝える」かを
+      決めること**
+- [ ] **M5: `oxlint` の `ignorePatterns` が `**/*.test.{ts,tsx}` を丸ごと除外している。**
+      テストコードには `func-style` も `no-restricted-imports` も効いていない。lint 設定の
+      見直しが必要
+- [ ] **M6: `alarm()` の状態読み出しが try の外にある。**`this.#metaGet(BACKFILL_STATE_KEY)` の
+      読み出しが失敗すると 6 回リトライしたのち無記録で沈黙し、`status` が `running` のまま
+      固まる。SQLite の同期呼び出しなので現実的には起きにくいが、直すなら try の内側に含めること
+- [ ] **`#foldersOf` の `EXPLAIN QUERY PLAN` 未計測。Phase 2 着手前が期限。**perf 実測
+      (reports/2026-08-18-phase-1-index-perf.md)はフォルダのほぼ無い `perf/` で取っており、
+      フォルダ数に比例する経路(`#foldersOf` の EXISTS 相関サブクエリ)が 1 度も測られていない
+
+### 意図的に外したもの(理由は spec §9)
+
+サムネイル生成 / `ObjectHook` / `runAll` / Cloudflare Queues / `IMAGES` binding /
+`MediaFacts` / 空フォルダの表現 / R2 SQL / Vectorize。
+
+**入れる条件も spec §9 に書いてある。**「サムネイル生成 + もう 1 つの後処理」が揃ったとき、
+初めて `ObjectHook` の実装が 2 つになり拡張点の導入根拠が立つ。
+**課金は障壁ではない**(`IMAGES.info()` は常に無料、変換は月 5,000 unique まで無料)。
+**外した理由は複雑さである。**
 
 ### Phase 1 で必ず対処すると決めたもの
 
@@ -180,7 +259,7 @@ spec は Phase 1 以降を**方針と接続点のみ**記述している。着�
 | 2 | ビューア。`FileTypeCapability` を `opaque` / `view` / `view-and-edit` の variant に広げ、`Viewer` は `lazy()` で読む | — |
 | 3 | Markdown エディタと共同編集(y-durableobjects)。`MarkdownExtension` を導入 | **TipTap か Milkdown か。**Milkdown なら `MarkdownExtension` 型はフレームワーク側に置き換わる |
 | 4 | skyline ギャラリー | **SSR 純度と仮想化のどちらを取るか。**仮想化するとコンテナ幅の計測が要りクライアントコンポーネント化が避けられない |
-| 5 | Vectorize による意味検索 | **そもそも要るか。**Phase 1 の FTS5 を使ってから判断する |
+| 5 | Vectorize による意味検索 | **まだ決まらない。**Phase 1 の FTS5 を実測した結果、ASCII のファイル名はトークン前方一致で実用になり、日本語は中間一致が引けない。**先に bigram トークン化を試す価値がある**([実測](../reports/2026-08-18-phase-1-index-perf.md)) |
 | 6 | Rust + Cloudflare Containers でトランスコード | — |
 
 ### Worker 分割について

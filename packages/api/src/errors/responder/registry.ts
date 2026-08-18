@@ -1,6 +1,7 @@
 import { createRunner } from '@r2-drive/core';
 
 import { bucketNotFoundResponder } from './bucket-not-found/index';
+import { foreignCursorResponder } from './foreign-cursor/index';
 import { objectNotFoundResponder } from './object-not-found/index';
 import { preconditionFailedResponder } from './precondition-failed/index';
 import { unauthenticatedResponder } from './unauthenticated/index';
@@ -16,6 +17,7 @@ export const errorResponders = [
   unauthenticatedResponder,
   preconditionFailedResponder,
   uploadSessionResponder,
+  foreignCursorResponder,
 ] as const satisfies readonly ErrorResponder[];
 
 const resolveResponse = createRunner(errorResponders);

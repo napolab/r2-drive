@@ -35,11 +35,14 @@ describe('toDriveError', () => {
 });
 
 describe('createApiClient (ssr)', () => {
+  // media(indexed: false)を使う。R2 binding に直接置いたオブジェクトが一覧に出ることを
+  // 見たいので、索引を経由しない経路である必要がある(photos は Task 11 で
+  // indexed: true になった)。
   it('ネットワークを経由せず Hono を直接呼ぶ', async () => {
-    await env.BUCKET_PHOTOS.put('a.txt', 'a');
+    await env.BUCKET_MEDIA.put('a.txt', 'a');
     const client = createApiClient(ssrTransport());
 
-    const page = (await request(() => client.buckets[':bucketId'].objects.$get({ param: { bucketId: 'photos' }, query: {} })))._unsafeUnwrap();
+    const page = (await request(() => client.buckets[':bucketId'].objects.$get({ param: { bucketId: 'media' }, query: {} })))._unsafeUnwrap();
 
     expect(page.objects.map((o) => o.key)).toEqual(['a.txt']);
   });

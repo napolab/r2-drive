@@ -35,3 +35,12 @@ app.route('/api', api);
 app.all('*', (c) => handler.fetch(c.req.raw));
 
 export default app;
+
+// Durable Object のクラスは Worker エントリから export されている必要がある
+// (wrangler.jsonc の durable_objects.bindings[].class_name = "ObjectIndex" は
+// このファイルの export 名で解決される)。このファイルだけが @r2-drive/api を
+// 値として import してよいので、再輸出もここで行う(spec §11.3)。
+//
+// これにより wrangler types が Env.OBJECT_INDEX を
+// DurableObjectNamespace<ObjectIndex> に解決できるようになる。
+export { ObjectIndex } from '@r2-drive/api';
