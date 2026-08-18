@@ -178,16 +178,26 @@ DurableObject<Env>            (cloudflare:workers)
       ▲
 SqliteStore                   スキーマ適用と Drizzle インスタンスの保持だけ
       ▲
-ObjectIndex                   upsert / remove / list / listFolders / search / backfill
+ObjectIndex                   upsert / remove / list / search / count / status / startBackfill / alarm
 ```
 
 ```ts
-// packages/api/src/index-do/sqlite-store.ts
+// packages/api/src/object-index/sqlite-store.ts
 export class SqliteStore extends DurableObject<Env> { ... }
 
-// packages/api/src/index-do/index.ts
+// packages/api/src/object-index/index.ts
 export class ObjectIndex extends SqliteStore { ... }
 ```
+
+**実装時の訂正(最終レビュー、2026-08-18):**上の 2 点は当初の設計から変わっている。
+
+- **配置先は `packages/api/src/index-do/` ではなく `packages/api/src/object-index/`。**
+  `index-do` というディレクトリは実装されていない
+- **メソッド一覧が変わった。**`listFolders` という独立メソッドは無く、`#foldersOf` として
+  `list()` に内包されている(フォルダと通常オブジェクトを 1 回の `list()` 呼び出しで返すため)。
+  `backfill` という単一メソッドも無く、起動用の `startBackfill`(§7 参照)と、DO の `alarm()`
+  オーバーライドの 2 つに分かれている。読み取り専用の `count` / `status` は当初の一覧に
+  無かったもので、運用の観測口(`GET /buckets/:id/index/status`)の出典として追加された
 
 ### この形が成立する根拠
 
@@ -270,7 +280,14 @@ DO の `alarm()` が R2 を 1 ページずつ舐め、カーソルを `meta` に
 **`alarm()` を使うのはここ 1 箇所だけである。**
 
 - 1 回の alarm で 1 ページ(`R2.list()` の上限 1,000 件)を処理し、次の alarm を予約する
-- 途中で失敗しても、カーソルが残っているので再実行で続きから進む
+- **「再実行で続きから進む」が成り立つのは alarm と alarm の間で中断した場合に限る。**
+  カーソルは `meta.backfill_cursor` に永続化されるので、DO が退避しても次の alarm は
+  続きから進む。**しかし `POST /index/backfill`(`startBackfill`)を明示的に叩き直した
+  場合は違う:** `startBackfill` は `#metaClear(BACKFILL_CURSOR_KEY)` でカーソルを先頭に
+  戻し、最初からやり直す設計になっている(実装時の訂正、最終レビュー、2026-08-18。
+  §13 の判定表 6 に元々この注記があったが、この本文が未訂正だった)。
+  「取りこぼしを作らない」側に倒した意図的な判断であり、`upsert` が冪等なので
+  **最終状態は同じく全件揃う**
 - `alarm()` は at-least-once・指数バックオフ(初回 2s、最大 6 回)。**組み込みの 6 回で尽きるので、
   無限リトライが要る場合は handler 内で例外を捕まえて `setAlarm()` を貼り直す**
 - 進捗は `status()` で読めるようにする。運用者が完了を確認して `indexed: true` に切り替える

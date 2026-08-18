@@ -463,6 +463,10 @@ Ruling 18 の cursor タグは `NextPage.cursor`(クライアントから見て 
 
 ## 切り替えの手順(次のバケットのために)
 
+0. **別環境でこのブランチを初めて deploy するとき**は、`apps/web/wrangler.jsonc.example` の
+   `durable_objects` と `migrations` の 2 ブロックを、自分の(gitignore 済みの)
+   `apps/web/wrangler.jsonc` に手で写す。索引の実体である DO の binding がここに無いと
+   バックフィル自体が起動しない(最終レビュー I2 の「デプロイ導線」)
 1. `POST /api/buckets/:id/index/backfill` を叩く(202 が返る)
 2. `GET /api/buckets/:id/index/status` が `{"kind":"complete","indexed":N}` になるまで待つ。
    **`N` が R2 の実件数と一致することを確認する**
@@ -472,3 +476,16 @@ Ruling 18 の cursor タグは `NextPage.cursor`(クライアントから見て 
 一覧要求がその DO のブロックに巻き込まれる(上の「バックフィル」節の実測)。
 また、**運用中に `indexed` を実行時に切り替えられるようにしてはいけない**
 (`buckets/index.ts` の backfill エンドポイントのコメントに理由がある)。
+
+### 運用中の回復(バックフィルを再実行する場合)の注記
+
+`uploads/index.ts` の multipart complete のコメントは「索引書き込みに失敗した場合の回復手段は
+バックフィルである」と約束している。一方、上の「バックフィル」節の実測は「`indexed: true` の
+バケットで運用中にバックフィルを叩くと一覧が最大 3.2 秒ブロックする」と言っており、字面だけ
+見ると `photos`(今 `indexed: true`)で公式の回復手段が公式に禁じられているように読める
+(最終レビュー I2)。**この 2 つは矛盾しない。**規模で使い分けること:
+
+- **10,000 件規模までなら、ブロック(数秒)を許容して `indexed: true` のままバックフィルを
+  叩いてよい。**運用中の一覧が数秒止まるだけで、索引もオブジェクトも壊れない
+- **100,000 件規模になったら、`indexed: false` に落としてから叩く。**上の「切り替えの手順」
+  (0〜3)をそのまま踏み、`complete` を確認してから `indexed: true` に戻して再デプロイする

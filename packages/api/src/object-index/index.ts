@@ -350,6 +350,12 @@ export class ObjectIndex extends SqliteStore {
   //
   // failed からもここで復帰する。reason を消して running に戻すだけでよい
   // (原因を直してから叩き直す、が運用手順)。
+  //
+  // 走行中に叩くと、in-flight の alarm(#indexPage が await bucket.list() の途中)が
+  // 完了時に `#metaSet(BACKFILL_CURSOR_KEY, listed.cursor)` を書き、ここで行った
+  // カーソルのクリアを上書きしうる(最終レビュー I4)。`backfill_pages` のカウンタも
+  // そのぶんずれる。最終状態は upsert が冪等なので揃うが、状態機械の記述(「叩き直すと
+  // 先頭に戻る」)と実装がこの競合ウィンドウでは食い違う。
   async startBackfill(bucketId: string): Promise<BackfillStatus> {
     this.#metaSet(BACKFILL_BUCKET_ID_KEY, bucketId);
     this.#metaClear(BACKFILL_CURSOR_KEY);
