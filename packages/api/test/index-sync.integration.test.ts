@@ -5,8 +5,10 @@ import { api } from '../src/index';
 
 import { objectIndexNamespace } from './object-index-namespace';
 
-// bucketDescriptors.indexed は false なので、この統合テストでは
-// 「索引に書かれること」を DO 直読みで確認する(一覧経路はまだ R2)。
+// ここで見たいのは「書き込み経路が索引に行を作る / 消す」ことだけなので、一覧経路を
+// 通さず DO を直読みする。**この形は indexed の内訳に依存しない**(photos が
+// indexed: true になった Task 11 以降も、書き込みが索引に届くかどうかは別の関心事)。
+// 一覧経路が索引を読むことは test/indexed-objects.integration.test.ts が見ている。
 const indexOf = (bucketId: string) => objectIndexNamespace.get(objectIndexNamespace.idFromName(bucketId));
 
 it('単発アップロードが索引に行を作る', async () => {

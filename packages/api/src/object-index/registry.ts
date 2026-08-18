@@ -21,10 +21,10 @@ export const resolveObjectIndex = (env: Env, id: string): Result<DurableObjectSt
 };
 
 // 索引を担当するバケットかどうか。deploy 時の設定なので同期で判定できる。
-// bucketDescriptors は `as const satisfies` で全要素が indexed: false のリテラル型に
-// 固定されているため、`=== true` は現時点で常に false と評価され tsgo が
-// 到達不能な比較として弾く(TS2367)。`?? false` なら、将来 indexed: true の要素が
-// 増えて union が広がっても書き換え不要。
+// `?? false` は「未登録のバケット」を「索引しない」に畳むためのもの。
+// bucketDescriptors は `as const satisfies` でリテラル型に固定されるので、
+// 全要素の indexed が同じ真偽値になった瞬間 `=== true` は到達不能な比較として
+// tsgo に弾かれる(TS2367)。この形なら indexed の内訳が変わっても書き換え不要。
 export const isIndexed = (id: string): boolean => bucketDescriptors.find((d) => d.id === id)?.indexed ?? false;
 
 // indexed かどうかに関わらず書く。索引を後から有効化するとき、

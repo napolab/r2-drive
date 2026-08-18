@@ -84,27 +84,53 @@ Phase 0 spec は Phase 1 を「D1 索引」「`ObjectHook` を導入」と書い
 
 追加 binding は **`OBJECT_INDEX` の 1 つだけ**。新しい抽象はゼロ。`ObjectDescriptor` のワイヤ型も変わらない。
 
+### 実装は完了した(2026-08-18)
+
+**実測と受け入れ基準 7 件の判定は [`reports/2026-08-18-phase-1-index-perf.md`](../reports/2026-08-18-phase-1-index-perf.md)。**
+`photos` は `indexed: true` に切り替え済み。`media` は R2 経路の対照として `indexed: false` のまま残してある。
+
+一覧の 1 ページ目(10,000 件のフォルダ)は **17.69 ms → 7.35 ms(約 2 倍)。**
+バックフィルは 10,000 件を 10 ページ・約 5 秒で取り切る。**7 件すべて満たした**が、
+基準 2(検索)と基準 6(バックフィル)には数字の意味を狭める注記がある。レポートを読むこと。
+
 ### 着手前に潰す(実装計画の最初の 2 つ)
 
-- [ ] **DO SQLite で FTS5 が使えることを実測で確かめる。**falsy なら検索の設計だけ組み直す
-- [ ] **Drizzle の `await` 連鎖で write coalescing が保たれるかを確かめる。**
-      falsy なら明示トランザクションで囲うか、書き込み経路だけ raw `sql.exec` にする
+- [x] **DO SQLite で FTS5 が使えることを実測で確かめる。**falsy なら検索の設計だけ組み直す
+      → 使える(`packages/api/test/fts5-availability.test.ts`)
+- [x] **Drizzle の `await` 連鎖で write coalescing が保たれるかを確かめる。**
+      → **保たれない。**連続した `sql.exec` は失敗した文の直前までを巻き戻さないことを対照実験で確認し
+      (`packages/api/test/sql-exec-atomicity.test.ts`)、`db.transaction()` で明示的に囲う形にした
 
 ### DO と索引
 
-- [ ] `SqliteStore`(基底)→ `ObjectIndex` の継承構成。**RPC は prototype chain を見るので
+- [x] `SqliteStore`(基底)→ `ObjectIndex` の継承構成。**RPC は prototype chain を見るので
       継承メソッドも公開される。**arrow property で書くと stub から呼べなくなる
-- [ ] スキーマ 4 表(`objects` / `prefixes` / `objects_fts` / `meta`)。`bucket_id` 列は持たない
-- [ ] `worker.ts` が `export { ObjectIndex } from '@r2-drive/api'` で再輸出する
-- [ ] **FTS5 は upsert と同じ書き込み経路で明示的に更新する。**更新漏れはテストで封じる
+- [x] スキーマ 4 表(`objects` / `prefixes` / `objects_fts` / `meta`)。`bucket_id` 列は持たない
+- [x] `worker.ts` が `export { ObjectIndex } from '@r2-drive/api'` で再輸出する
+- [x] **FTS5 は upsert と同じ書き込み経路で明示的に更新する。**更新漏れはテストで封じる
 
 ### 経路
 
-- [ ] アップロード / 削除の後に `stub.upsert()` / `stub.remove()` を await する
-- [ ] `indexedSource` を registry の先頭に足す。判定は `bucketDescriptors.indexed`(**deploy 時の設定**)
-- [ ] `GET /buckets/:id/search?q` を足す。戻りは既存の `ObjectPage`
-- [ ] バックフィル: `alarm()` が R2 を 1,000 件ずつ舐めてカーソルを `meta` に置く。冪等であること
-- [ ] 起動 `POST /buckets/:id/index/backfill` と観測 `GET /buckets/:id/index/status`
+- [x] アップロード / 削除の後に `stub.upsert()` / `stub.remove()` を await する
+- [x] `indexedSource` を registry の先頭に足す。判定は `bucketDescriptors.indexed`(**deploy 時の設定**)
+- [x] `GET /buckets/:id/search?q` を足す。戻りは既存の `ObjectPage`
+- [x] バックフィル: `alarm()` が R2 を 1,000 件ずつ舐めてカーソルを `meta` に置く。冪等であること
+- [x] 起動 `POST /buckets/:id/index/backfill` と観測 `GET /buckets/:id/index/status`
+- [x] **索引が返す cursor に経路タグを付ける(Ruling 18)。**`indexed: false → true` の切り替え
+      deploy を跨いだ R2 の opaque cursor が索引経路に渡ると、**エラーにならず静かに
+      1 ページ目を返し続ける。**`k1:` / `q1:` のタグで検出して 412 にする
+
+### Phase 1 から持ち越したもの
+
+- [ ] **`ErrorName` に `'ForeignCursorError'` を足して 400 で返す。**今は `packages/core` を
+      触らない制約のため `PreconditionFailedError`(412)に載せている。
+      `packages/core` を触るタイミングで移すこと(レポートの Ruling 18 節に理由)
+- [ ] **日本語検索の中間一致。**FTS5 の既定 tokenizer は連続する CJK を 1 トークンにするため、
+      `休暇の写真.jpg` は `休暇` では引けるが `写真`(末尾)/ `暇の写`(中間)では引けない。
+      **Vectorize(Phase 5)より先に bigram トークン化を試す価値がある**(レポートの「検索」節)
+- [ ] **バックフィル中は同じ DO への読み取りが最大 3.2 秒ブロックされる。**10,000 件では
+      運用手順(`indexed: false` のままバックフィル → complete 確認 → `true` にして再デプロイ)で
+      避けられるが、**100,000 件規模ではバッチ upsert を検討すること**
 
 ### 意図的に外したもの(理由は spec §9)
 
@@ -183,7 +209,7 @@ spec は Phase 1 以降を**方針と接続点のみ**記述している。着�
 | 2 | ビューア。`FileTypeCapability` を `opaque` / `view` / `view-and-edit` の variant に広げ、`Viewer` は `lazy()` で読む | — |
 | 3 | Markdown エディタと共同編集(y-durableobjects)。`MarkdownExtension` を導入 | **TipTap か Milkdown か。**Milkdown なら `MarkdownExtension` 型はフレームワーク側に置き換わる |
 | 4 | skyline ギャラリー | **SSR 純度と仮想化のどちらを取るか。**仮想化するとコンテナ幅の計測が要りクライアントコンポーネント化が避けられない |
-| 5 | Vectorize による意味検索 | **そもそも要るか。**Phase 1 の FTS5 を使ってから判断する |
+| 5 | Vectorize による意味検索 | **まだ決まらない。**Phase 1 の FTS5 を実測した結果、ASCII のファイル名はトークン前方一致で実用になり、日本語は中間一致が引けない。**先に bigram トークン化を試す価値がある**([実測](../reports/2026-08-18-phase-1-index-perf.md)) |
 | 6 | Rust + Cloudflare Containers でトランスコード | — |
 
 ### Worker 分割について

@@ -392,3 +392,24 @@ Phase 0 spec §14 の未決事項「`ObjectHook` に `hookable` を使うか自�
    囲い忘れは黙って不整合を生む。この基準が唯一それを検出できる
 6. バックフィルを途中で止めて再実行すると、続きから進んで全件揃う
 7. `ObjectDescriptor` と `NextPage` のワイヤ型が変わっていない(クライアント無変更)
+
+### 判定(2026-08-18)
+
+**7 件すべて満たした。**確認方法と数字の全文は
+[`reports/2026-08-18-phase-1-index-perf.md`](../../../reports/2026-08-18-phase-1-index-perf.md)。
+`photos` は `indexed: true` に切り替え済み、`media` は R2 経路の対照として `indexed: false` のまま。
+
+| | 判定 | 確認方法 | 数字 / 注記 |
+|---|---|---|---|
+| 1 | ✅ | 同じ 10,000 件・同じ URL に対し `indexed` だけを反転して再起動し、ウォームアップ 2 回 + 5 回計測の中央値 | **17.69 ms → 7.35 ms(2.41 倍)。**20 回で取り直すと 15.58 → 7.63 ms(2.04 倍)。**2 倍前後と読むのが妥当** |
+| 2 | ✅ | `GET /search?q=meeting` が 10,005 行から 100 件を `next: more` 付きで返すことを確認 | 中央値 **7.36 ms**。**ただし引けるのは「トークンの前方一致」であって任意位置の部分文字列ではない**(`notes` は引けるが `otes` は引けない) |
+| 3 | ✅ | 同じ 4 キーを `photos`(索引)と `media`(R2)の両方に置き、一覧 JSON を突き合わせ | `bucketId` と `uploadedAt` を除いて**完全一致。**`media` の cursor は R2 の opaque token のまま |
+| 4 | ✅ | 索引 DO の SQLite を丸ごと削除し、`indexed: false` の状態で一覧を叩いた | **1,000 件が返った。**同じ状態の検索は 0 件(索引が空なので正しい) |
+| 5 | ✅ | Task 6 のテストで固定済み(`object-index.test.ts`)。**`upsert` で name を変えると古い名前で引けなくなること**まで張っている | 実測でも seed した 10,000 件が検索から引けている |
+| 6 | ✅ | `backfill-pagination.integration.test.ts` が 1,001 件でページ境界をまたがせている。実測でも 10,000 件を `backfill_pages = 10` で取り切った | **「続きから」が成り立つのは alarm 間の中断。**`POST /backfill` を叩き直すと設計上カーソルは先頭に戻る(冪等なので最終状態は同じ) |
+| 7 | ✅ | `git diff main -- packages/core` が空 | Ruling 18 の cursor タグは `NextPage.cursor` の**中身**を変えただけ。`apps/web` は無変更 |
+
+**Ruling 18 を切り替えの前提条件として先に実装した。**`indexed: false → true` の deploy を跨いだ
+クライアントの R2 opaque cursor が索引経路に渡ると、`WHERE key > '<base64>'` として解釈されて
+**エラーにならず 1 ページ目を返し続ける。**`list` は `k1:`、`search` は `q1:` のタグを前置し、
+タグの無い / 違う cursor は 412 で弾く。

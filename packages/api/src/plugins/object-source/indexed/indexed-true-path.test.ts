@@ -3,12 +3,13 @@ import { describe, expect, it, vi } from 'vitest';
 
 import type { ObjectIndex } from '../../../object-index/index';
 
-// indexed: true の分岐は bucketDescriptors(deploy 時の設定)が全て false に固定されて
-// いるため、production の bucketDescriptors を書き換えずに再現するには
-// object-index/registry を差し替えるしかない。indexedSource.run 自体は
-// isIndexed / resolveObjectIndex という 2 つの関数の合成でしかないので、
-// この 2 つをモックして「indexed: true 相当の状況で run が索引の DO stub を
-// 呼び、その結果をそのまま ok(ResultAsync) として返す」ことを検証する。
+// indexedSource.run 自体は isIndexed / resolveObjectIndex という 2 つの関数の合成でしか
+// ないので、この 2 つをモックして「run が索引の DO stub の list を呼び、その結果を
+// そのまま ok(ResultAsync) として返す」ことと、渡す引数(特に INDEX_PAGE_SIZE)を検証する。
+//
+// production の bucketDescriptors に依存しないのが要点である。Task 11 で photos が
+// indexed: true になったが、**このテストは registry の内訳が今後どう変わっても落ちない。**
+// registry を出典にした担当判定のほうは indexed.test.ts が別途固定している。
 vi.mock('../../../object-index/registry', () => ({
   isIndexed: vi.fn(() => true),
   resolveObjectIndex: vi.fn(),
