@@ -21,7 +21,9 @@ export const downloadAction: ObjectAction = {
           run: async (objects) => {
             const client = getApiClient();
             for (const object of objects) {
-              const url = client.buckets[':bucketId'].content[':path{.+}'].$url({ param: { bucketId: object.bucketId, path: object.key } });
+              // ?v= に etag を載せて一覧のプレビューと同じ content-addressed URL にする。
+              // 既にプレビュー済みのファイルはキャッシュから即座にダウンロードされる。
+              const url = client.buckets[':bucketId'].content[':path{.+}'].$url({ param: { bucketId: object.bucketId, path: object.key }, query: { v: object.etag } });
               const anchor = document.createElement('a');
               anchor.href = url.toString();
               anchor.download = object.name;

@@ -41,17 +41,19 @@ describe('GET /buckets/:bucketId/objects', () => {
     expect(first?.contentType).toBe('text/markdown');
   });
 
-  it('保存済みの httpMetadata.contentType が拡張子推定に勝つ(include: httpMetadata の観測)', async () => {
+  it('一覧の contentType は保存済み httpMetadata より拡張子が勝つ', async () => {
     // .md 拡張子だが httpMetadata.contentType を明示している。
-    // list() に include: ['httpMetadata'] が無いと R2 は httpMetadata を返さず、
-    // contentTypeOf は拡張子フォールバック(text/markdown)に落ちてこのテストは失敗する。
+    // list() から include: ['httpMetadata'] を外したので R2 は httpMetadata を返さず、
+    // contentTypeOf は拡張子(text/markdown)で確定する。
+    // include を付けると 1 ページが 100 件に丸められるため、往復数を優先して外した
+    // (`packages/api/src/r2/list.ts` の contentTypeOf のコメントに理由がある)。
     await putWithContentType('docs/typed.md', 'x', 'text/plain');
 
     const res = await api.request('/buckets/photos/objects?prefix=docs%2F', {}, env);
     const page = (await res.json()) as ObjectPage;
     const typed = page.objects.find((o) => o.key === 'docs/typed.md');
 
-    expect(typed?.contentType).toBe('text/plain');
+    expect(typed?.contentType).toBe('text/markdown');
   });
 
   it('未登録バケットは 404 と BucketNotFoundError', async () => {

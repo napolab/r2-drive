@@ -11,9 +11,12 @@ import * as styles from './b.$bucketId.$.styles.css';
 import type { ApiClient } from '@r2-drive/api/client';
 import type { ObjectDescriptor } from '@r2-drive/core';
 
+// content-addressed URL。etag を ?v= に載せることで、サーバが「この URL は
+// この中身しか指さない」と判断でき immutable を返せる(戻るたびの再ダウンロードを消す)。
+// 上書きされれば etag が変わり URL も変わるので stale にならない。
 const getContentUrl = (object: ObjectDescriptor): string => {
   const client = getApiClient();
-  return client.buckets[':bucketId'].content[':path{.+}'].$url({ param: { bucketId: object.bucketId, path: object.key } }).toString();
+  return client.buckets[':bucketId'].content[':path{.+}'].$url({ param: { bucketId: object.bucketId, path: object.key }, query: { v: object.etag } }).toString();
 };
 
 const RouteComponent = () => {

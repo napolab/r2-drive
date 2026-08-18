@@ -159,7 +159,7 @@ describe('createAwsS3Options', () => {
         parts: [{ PartNumber: 1, ETag: 'part-etag' }],
         signal: new AbortController().signal,
       }),
-    ).resolves.toEqual({ location: 'https://drive.test/api/buckets/photos/content/docs/big.bin', key: 'docs/big.bin', bucket: 'photos' });
+    ).resolves.toEqual({ location: 'https://drive.test/api/buckets/photos/content/docs/big.bin?v=complete-etag', key: 'docs/big.bin', bucket: 'photos' });
     const request = getOnlyRequest(requests);
     expect(request.method).toBe('POST');
     expect(await request.json()).toEqual({ key: 'docs/big.bin', parts: [{ partNumber: 1, etag: 'part-etag' }] });

@@ -35,7 +35,7 @@ describe('downloadAction', () => {
 
     await getDescriptor().run([object]);
 
-    expect(clicks).toEqual([{ href: 'http://localhost:3000/api/buckets/photos/content/docs/readme%20file.txt', download: 'readme file.txt' }]);
+    expect(clicks).toEqual([{ href: 'http://localhost:3000/api/buckets/photos/content/docs/readme%20file.txt?v=readme', download: 'readme file.txt' }]);
     expect(document.querySelectorAll('a[download]')).toHaveLength(0);
   });
 });
