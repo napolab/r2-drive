@@ -51,21 +51,21 @@ describe('respondTo', () => {
   // wire に出る名前は既存の PreconditionFailedError に載せる(packages/core の
   // ErrorName を増やさないため。foreign-cursor/index.ts のコメント参照)。
   it('ForeignCursorError を 412 / PreconditionFailedError にする', () => {
-    expect(respondTo(new ForeignCursorError('list'))).toEqual({
+    expect(respondTo(new ForeignCursorError('object index list'))).toEqual({
       status: 412,
-      body: { name: 'PreconditionFailedError', message: 'cursor was not issued by the object index list route' },
+      body: { name: 'PreconditionFailedError', message: 'cursor does not belong to the object index list route' },
     });
   });
 
   it('RPC 境界を越えて class が失われた ForeignCursorError も 412 にする', () => {
-    const tunneled = asRpcTunneled(new ForeignCursorError('list'));
+    const tunneled = asRpcTunneled(new ForeignCursorError('object index list'));
     expect(tunneled).not.toBeInstanceOf(ForeignCursorError);
 
     expect(respondTo(tunneled).status).toBe(412);
   });
 
   it('R2OperationError に包まれた ForeignCursorError も 412 にする(索引経路の実際の形)', () => {
-    const error = new R2OperationError('index list failed: a/', { cause: asRpcTunneled(new ForeignCursorError('list')) });
+    const error = new R2OperationError('index list failed: a/', { cause: asRpcTunneled(new ForeignCursorError('object index list')) });
 
     expect(respondTo(error).status).toBe(412);
   });

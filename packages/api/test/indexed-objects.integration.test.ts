@@ -51,6 +51,6 @@ describe('GET /buckets/photos/objects(indexed: true = 索引経路)', () => {
     const res = await api.request('/buckets/photos/objects?prefix=idx%2F&cursor=eyJrIjoiaWR4L2EudHh0In0', {}, env);
 
     expect(res.status).toBe(412);
-    expect(await res.json()).toEqual({ name: 'PreconditionFailedError', message: 'cursor was not issued by the object index list route' });
+    expect(await res.json()).toEqual({ name: 'PreconditionFailedError', message: 'cursor does not belong to the object index list route' });
   });
 });

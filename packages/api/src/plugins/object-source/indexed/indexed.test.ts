@@ -36,8 +36,10 @@ describe('indexedSource', () => {
     expect(indexedSource.run(input)._unsafeUnwrapErr()).toBe(input);
   });
 
-  // indexed: true 側のディスパッチ。env を触らないのは run が担当判定しかしないため
-  // (実際の DO 呼び出しは indexed-true-path.test.ts がモックで固定している)。
+  // indexed: true 側のディスパッチ。**担当すると判定した時点で run は
+  // resolveObjectIndex(env, id) まで同期的に進む**ので、ここだけは env が実際に触られる
+  // (だから requestFor は本物の env を渡している)。DO への list 呼び出し自体は
+  // await するまで走らないので、その先は indexed-true-path.test.ts がモックで固定している。
   it('indexed のバケットは担当する', () => {
     expect(indexedSource.run(requestFor('photos')).isOk()).toBe(true);
   });

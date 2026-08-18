@@ -12,11 +12,17 @@ Ruling 18(cursor の経路タグ)の実装: `fbe5ca8`
 
 **`photos` を `indexed: true` に切り替えた。`media` は `indexed: false` のまま残した。**
 
-|                                    |       中央値 | 備考                                                 |
-| ---------------------------------- | -----------: | ---------------------------------------------------- |
-| `indexed: false`(`R2.list()` 経路) | **17.69 ms** | 5 回、`GET /api/buckets/photos/objects?prefix=perf/` |
-| `indexed: true`(索引経路)          |  **7.35 ms** | 同じ URL・同じデータ・同じ手順                       |
-|                                    |  **2.41 倍** |                                                      |
+`GET /api/buckets/photos/objects?prefix=perf/`(10,000 件のフォルダの 1 ページ目)。
+**同じ URL・同じデータ・同じ手順で、`indexed` の 1 行だけを反転して測った。**
+
+|                                    | 5 回の中央値 | 20 回の中央値 |
+| ---------------------------------- | -----------: | ------------: |
+| `indexed: false`(`R2.list()` 経路) | **17.69 ms** |      15.58 ms |
+| `indexed: true`(索引経路)          |  **7.35 ms** |       7.63 ms |
+|                                    |      2.41 倍 |   **2.04 倍** |
+
+**5 回だとばらつきが大きい**(基準線の最大 55.29 ms が 1 本だけ飛んでいる)ので 20 回でも取り直した。
+**「2 倍前後」と読むのが妥当で、2.41 倍を代表値として持ち出すのは楽観的である。**
 
 **受け入れ基準は 7 件すべて満たした。**ただし基準 2(検索)と基準 6(バックフィル)には、
 数字の意味を狭める注記がある。下の「受け入れ基準の判定」に書いた。
@@ -26,16 +32,16 @@ Ruling 18(cursor の経路タグ)の実装: `fbe5ca8`
 
 ## 計測条件
 
-|          |                                                                                                                  |
-| -------- | ---------------------------------------------------------------------------------------------------------------- |
-| 環境     | ローカル `pnpm --filter web dev`(vite + `@cloudflare/vite-plugin` = workerd + miniflare)。macOS / darwin 25.4.0  |
-| 経路     | `curl` → `http://localhost:5173/api/...`(実アプリが通る HTTP の口。DO を直接叩いてはいない)                      |
-| 計測値   | `curl -w '%{time_total}'`。**ネットワークは localhost なので、ほぼサーバ側の処理時間である**                     |
-| データ   | `apps/web/scripts/seed-r2.ts --total=10000 --concurrency=20`。`perf/` 直下に平坦に 10,000 件、サブフォルダ無し   |
-| 内訳     | 30% が 1280x960 のグレースケール JPEG(125,132 bytes)、70% が 256〜640 bytes のランダムバイト列。R2 の総量 437 MB |
-| 初期化   | 計測前に dev を停止 → `rm -rf apps/web/.wrangler/state/v3/r2` → 起動 → seed                                      |
-| 手順     | **ウォームアップ 2 回 → 計測 5 回 → 中央値。**基準線と索引経路で完全に同じ手順を踏んだ                           |
-| viewport | **無関係。**ブラウザを開いていない。API の応答時間だけを測っている(描画の計測は Phase 0 の Task 16 レポート)     |
+|          |                                                                                                                                                                                                                                                              |
+| -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| 環境     | ローカル `pnpm --filter web dev`(vite + `@cloudflare/vite-plugin` = workerd + miniflare)。macOS / darwin 25.4.0                                                                                                                                              |
+| 経路     | `curl` → `http://localhost:5173/api/...`(実アプリが通る HTTP の口。DO を直接叩いてはいない)                                                                                                                                                                  |
+| 計測値   | `curl -w '%{time_total}'`。**ネットワークは localhost なので、ほぼサーバ側の処理時間である**                                                                                                                                                                 |
+| データ   | `apps/web/scripts/seed-r2.ts --total=10000 --concurrency=20`。`perf/` 直下に平坦に 10,000 件、サブフォルダ無し                                                                                                                                               |
+| 内訳     | 30% が 1280x960 のグレースケール JPEG(125,132 bytes)、70% が 256〜640 bytes のランダムバイト列。**R2 の総量 437 MB は `du -sh apps/web/.wrangler/state/v3/r2` の実測**(miniflare の SQLite / blob store 込みなので、payload の総和 約 378 MB とは一致しない) |
+| 初期化   | 計測前に dev を停止 → `rm -rf apps/web/.wrangler/state/v3/r2` → 起動 → seed                                                                                                                                                                                  |
+| 手順     | **ウォームアップ 2 回 → 計測 5 回 → 中央値。**基準線と索引経路で完全に同じ手順を踏んだ                                                                                                                                                                       |
+| viewport | **無関係。**ブラウザを開いていない。API の応答時間だけを測っている(描画の計測は Phase 0 の Task 16 レポート)                                                                                                                                                 |
 
 **`indexed` の切り替え以外は何も変えていない。**`packages/api/src/r2/registry.ts` の 1 行を
 `false` → `true` にして dev を再起動しただけである。R2 の中身も索引の中身も同じ。
@@ -228,17 +234,76 @@ base64 で `:` を含まない)。数字は形式のバージョンで、cursor 
 
 ### 実際の HTTP の口での確認(切り替え後)
 
-| 送ったもの                                        | 結果                                                                                                          |
-| ------------------------------------------------- | ------------------------------------------------------------------------------------------------------------- |
-| `media`(R2 経路)の cursor を `photos`(索引経路)へ | **412** `{"name":"PreconditionFailedError","message":"cursor was not issued by the object index list route"}` |
-| `photos` の検索が発行した cursor(`q1:`)を一覧へ   | **412**(同じボディ)                                                                                           |
-| `photos` の一覧が発行した cursor(`k1:`)を一覧へ   | **200**、2 ページ目(`perf/01000-a.jpg` から)が返る                                                            |
+| 送ったもの                                        | 結果                                                                                                           |
+| ------------------------------------------------- | -------------------------------------------------------------------------------------------------------------- |
+| `media`(R2 経路)の cursor を `photos`(索引経路)へ | **412** `{"name":"PreconditionFailedError","message":"cursor does not belong to the object index list route"}` |
+| `photos` の検索が発行した cursor(`q1:`)を一覧へ   | **412**(同じボディ)                                                                                            |
+| `photos` の一覧が発行した cursor(`k1:`)を一覧へ   | **200**、2 ページ目(`perf/01000-a.jpg` から)が返る                                                             |
 
-**wire に出る名前を `PreconditionFailedError` にしたのは、`packages/core` の `ErrorName` を
-増やさないためである**(このタスクは `packages/core` を変更しない前提で走っている)。
-内部のクラスは `ForeignCursorError` のままなので、ログ(`describeCauseChain`)では粒度が落ちない。
-**素直なのは `ErrorName` に `'ForeignCursorError'` を足して 400 で返すことなので、
-`packages/core` を触れるタイミングで移すべきである。**
+### Ruling 23 — 逆向きも同じだけ危なく、**R2 は弾かなかった**
+
+当初の実装は「逆向き(索引の cursor を R2 経路へ)は R2 が不正な token として自分で弾く」と
+仮定していた。**レビューで実測を求められ、測ったところ誤りだった。**
+
+実測(2026-08-18、`packages/api` の実 R2 binding 相手。`vitest-pool-workers` 上):
+
+| `list()` に渡した cursor       | R2 の応答                                              |
+| ------------------------------ | ------------------------------------------------------ |
+| `q1:pf/1.txt`(検索のタグ付き)  | **例外を投げない。**`objects: []` / `truncated: false` |
+| `k1:pf/1.txt`(一覧のタグ付き)  | 同上                                                   |
+| `!!!not-a-cursor!!!`(でたらめ) | 同上                                                   |
+| `cGYvMS50eHQ=`(base64 の本物)  | 正常にページング(`pf/2.txt` が返る)                    |
+
+**つまり R2 の cursor は base64(key) であり、デコードできない文字列は「全キーより後ろ」として
+扱われて空ページになる。**`listObjects` はそれを `next: { kind: 'end' }` に畳むので、
+**利用者から見ると一覧が静かに「ここで終わり」になる**——Ruling 18 が索引側で塞いだのと
+まったく同じ失敗クラスの裏返しである。
+
+**この経路は `indexed: false` のバケットでも踏める。**検索は `indexed` に関わらず索引 DO を通るので
+`q1:` cursor を返し、それを一覧に渡すと R2 経路に流れてくるからである。
+
+対処として `r2ListSource` にも `isIndexCursor` の判定を足した。判定は
+`packages/api/src/object-index/cursor/index.ts` の 1 箇所に集約してある。
+誤検出しないのは R2 の cursor が base64(`A-Za-z0-9+/=`)で **`:` を含まない**からである。
+
+| 送ったもの                                                | 結果                                                                                                 |
+| --------------------------------------------------------- | ---------------------------------------------------------------------------------------------------- |
+| `media` の検索が発行した `q1:` cursor を `media` の一覧へ | **412** `{"name":"PreconditionFailedError","message":"cursor does not belong to the r2 list route"}` |
+| `media` へ R2 の opaque cursor(base64)                    | **200**、従来どおりページングする                                                                    |
+
+前提そのもの(「R2 は弾かない」)も
+`packages/api/src/plugins/object-source/r2-list/r2-list.test.ts` にテストとして張った。
+**この行が落ちたら R2 側の挙動が変わったということなので、ガードの要否から考え直すこと。**
+
+### wire に出る名前 — `PreconditionFailedError` に載せている
+
+**`packages/core` の `ErrorName` を増やさないための選択である**(このタスクは
+`packages/core` を変更しない前提で走っている)。内部のクラスは `ForeignCursorError` のままなので、
+ログ(`describeCauseChain`)では粒度が落ちない。
+
+**素直なのは `ErrorName` に `'ForeignCursorError'` を足して 400 で返すことである。**
+`packages/core` を触れるタイミングで移すこと。**先送りできない期限が 1 つある:**
+
+> **ETag / 条件付きアップロード(`If-Match`)を入れると `PreconditionFailedError` の名前が衝突する。**
+> 412 は本来 `If-Match` 不一致(= オブジェクトが他人に書き換えられた)のための status であり、
+> そちらを実装した瞬間、クライアントは同じ `name` を受け取って
+> **「cursor を捨てて 1 ページ目から取り直す」と「オブジェクトが変わったので再取得する」を
+> 区別できなくなる。**回復動作が正反対なので、片方を実装するなら先に名前を分けること。
+
+### クライアントは今どう見えるか — **自動回復しない**
+
+**現状、412 を受けたクライアントは自分では回復しない。**
+`apps/web/src/queries/objects.ts` の `queryFn` は `Result` を `.match` で畳んでエラー側を
+throw するだけなので、**そのまま React Query のエラーとして error boundary まで上がる。**
+
+つまり **`indexed: false → true` の切り替え deploy の瞬間にスクロール中だったユーザーは、
+次のページを要求したところでエラー画面を見る。リロードすれば回復する。**
+
+**これは「静かに間違ったファイル一覧を見せる」よりは遥かに良いが、まだ良くはない。**
+正しい振る舞いは「foreign cursor を受けたら cursor を捨てて 1 ページ目から取り直す」であり、
+実装場所は `apps/web/src/queries/objects.ts`(`getNextPageParam` / `queryFn` の周辺)になる。
+`docs/tasks.md` の持ち越しに入れた。**上の ETag の件が直接ブロックになる**ので、
+自動回復を実装するなら `ErrorName` の分離が先である。
 
 ### 副産物 — DO の RPC 境界はクラスを落とし、`name` だけ残す
 
@@ -277,18 +342,28 @@ base64 で `:` を含まない)。数字は形式のバージョンで、cursor 
 
 ### 3. `indexed: false` のバケットが Phase 0 と完全に同じ挙動をする ✅
 
-**確認方法:** 同じ 4 キー(`cmp/a.txt` / `cmp/docs/b.md` / `cmp/docs/nested/c.md` / `cmp/z.bin`)を
+この基準は「**`media` が Phase 0 と同じか**」であって「2 経路が同じ JSON を返すか」ではない。
+**この 2 つは別の命題である**(両方が同じように壊れていれば JSON は一致する)。
+したがって担保の主は回帰テストであり、経路の突き合わせは副である。
+
+**主 — 回帰テスト:** `packages/api/test/objects.integration.test.ts` は
+Phase 0 から R2 経路の挙動(delimiter / prefix / 拡張子由来の contentType / 未登録バケットの 404)を
+張っているファイルである。**アサーションを 1 行も変えずに対象バケットだけ `media` に移し、全件通した。**
+つまり Phase 0 が張っていた契約がそのまま `media` で成立している。
+R2 binding に直接 put しているので索引を一切経由しない。
+**`media` を `indexed: true` にするときはこのファイルを組み替えること**(そのことをファイル冒頭に書いた)。
+
+**副 — 2 経路の突き合わせ:** 同じ 4 キー(`cmp/a.txt` / `cmp/docs/b.md` / `cmp/docs/nested/c.md` / `cmp/z.bin`)を
 `photos`(索引経路)と `media`(R2 経路)の両方にアップロードし、
 `GET /objects?prefix=cmp/` と `?prefix=cmp/docs/` の JSON を突き合わせた。
+**`bucketId` と `uploadedAt` を除いて完全一致**(`folders` / `objects` / `next` のすべて)。
 
-**`bucketId` と `uploadedAt`(アップロード時刻が違う)を除いて完全一致した。**
-`folders` / `objects` / `next` のすべてが同じ。
-`media` の 1,100 件で `next.cursor` が R2 の opaque token のまま返り、
+- `bucketId` が違うのは、**別のバケットに問い合わせているので当然**である
+- `uploadedAt` が違うのは、**同じキーを 2 つのバケットへ別々に `PUT` したので put 時刻が違うため**である。
+  同一オブジェクトを 2 経路で読んで時刻がずれたわけではない
+
+`media` の 1,100 件で `next.cursor` が R2 の opaque token(base64)のまま返り、
 2 ページ目(100 件、`next: end`)も従来どおり取れることも確認した。
-
-回帰テストとしては、`packages/api/test/objects.integration.test.ts`(R2 binding に直接 put して
-一覧に出ることを見るファイル)の対象を `media` に移した。**`media` を `indexed: true` にするときは
-このファイルを組み替えること。**
 
 ### 4. 索引を意図的に壊した状態でも `indexed: false` なら一覧が出る ✅
 
@@ -343,8 +418,8 @@ Ruling 18 の cursor タグは `NextPage.cursor`(クライアントから見て 
 
 |                                 | 結果                                                   |
 | ------------------------------- | ------------------------------------------------------ |
-| `pnpm vitest run --project api` | **27 files / 183 tests** passed(切り替え前は 24 / 155) |
-| `pnpm test`                     | **58 files / 334 tests** passed                        |
+| `pnpm vitest run --project api` | **28 files / 192 tests** passed(切り替え前は 24 / 155) |
+| `pnpm test`                     | **59 files / 343 tests** passed                        |
 | `pnpm test:browser`             | **2 / 2** passed                                       |
 | `pnpm lint` / `pnpm typecheck`  | passed                                                 |
 
@@ -358,13 +433,14 @@ Ruling 18 の cursor タグは `NextPage.cursor`(クライアントから見て 
 
 新規に足したテスト:
 
-| ファイル                                                | 何を張るか                                                                                                  |
-| ------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------- |
-| `packages/api/src/object-index/cursor/cursor.test.ts`   | タグの往復 / R2 風の cursor の拒否 / list ↔ search の取り違えの拒否 / message に cursor を載せない          |
-| `packages/api/test/foreign-cursor.integration.test.ts`  | HTTP の口で 412 になること(**RPC が `name` を残すことまで通しで張る唯一の場所**)                            |
-| `packages/api/test/indexed-objects.integration.test.ts` | 索引経路の一覧が HTTP から見えること / **R2 に直接置いたものはバックフィルまで出ないこと** / 一覧の口の 412 |
-| `object-index.test.ts` の `cursor の経路タグ`           | DO レベルでの往復と 4 通りの拒否                                                                            |
-| `errors/responder/registry.test.ts`                     | RPC 境界でクラスを失った形でも 412 に落ちること                                                             |
+| ファイル                                                         | 何を張るか                                                                                                                                                                    |
+| ---------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `packages/api/src/object-index/cursor/cursor.test.ts`            | タグの往復 / R2 風の cursor の拒否 / list ↔ search の取り違えの拒否 / message に cursor を載せない / **`isIndexCursor` が R2 の base64 cursor を誤検出しないこと**            |
+| `packages/api/test/foreign-cursor.integration.test.ts`           | HTTP の口で 412 になること(**RPC が `name` を残すことまで通しで張る唯一の場所**)/ **`indexed: false` の `media` で検索の cursor を一覧に渡すと 412**(Ruling 23 の end-to-end) |
+| `packages/api/src/plugins/object-source/r2-list/r2-list.test.ts` | **Ruling 23。**「R2 は不正な cursor を弾かず空ページを返す」という前提そのものと、R2 経路側のガード。拒否が広すぎないことの対照も張っている                                   |
+| `packages/api/test/indexed-objects.integration.test.ts`          | 索引経路の一覧が HTTP から見えること / **R2 に直接置いたものはバックフィルまで出ないこと** / 一覧の口の 412                                                                   |
+| `object-index.test.ts` の `cursor の経路タグ`                    | DO レベルでの往復と 4 通りの拒否                                                                                                                                              |
+| `errors/responder/registry.test.ts`                              | RPC 境界でクラスを失った形でも 412 に落ちること                                                                                                                               |
 
 ## この数字が言っていないこと
 

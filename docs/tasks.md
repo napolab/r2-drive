@@ -119,12 +119,26 @@ Phase 0 spec は Phase 1 を「D1 索引」「`ObjectHook` を導入」と書い
 - [x] **索引が返す cursor に経路タグを付ける(Ruling 18)。**`indexed: false → true` の切り替え
       deploy を跨いだ R2 の opaque cursor が索引経路に渡ると、**エラーにならず静かに
       1 ページ目を返し続ける。**`k1:` / `q1:` のタグで検出して 412 にする
+- [x] **逆向きも塞ぐ(Ruling 23)。**索引のタグ付き cursor を R2 経路へ渡したとき、
+      **R2 は弾かず空ページ + `truncated: false` を返す**(実測)。つまり一覧が静かに
+      「ここで終わり」になる。`r2ListSource` にも `isIndexCursor` のガードを足した。
+      **`indexed: false` のバケットでも踏める**(検索は indexed に関わらず索引 DO を通るため)
 
 ### Phase 1 から持ち越したもの
 
 - [ ] **`ErrorName` に `'ForeignCursorError'` を足して 400 で返す。**今は `packages/core` を
       触らない制約のため `PreconditionFailedError`(412)に載せている。
-      `packages/core` を触るタイミングで移すこと(レポートの Ruling 18 節に理由)
+      **先送りできない期限がある: ETag / 条件付きアップロード(`If-Match`)を入れると
+      名前が衝突する。**412 は本来 `If-Match` 不一致(= オブジェクトが他人に書き換えられた)の
+      status であり、そちらを実装した瞬間、クライアントは同じ `name` を受け取って
+      **「cursor を捨てて 1 ページ目から取り直す」と「オブジェクトが変わったので再取得する」を
+      区別できなくなる。**回復動作が正反対なので、片方を実装するなら先に名前を分けること
+- [ ] **クライアントが foreign cursor(412)から自動回復しない。**
+      `apps/web/src/queries/objects.ts` の `queryFn` は `.match` でエラーを throw するだけなので、
+      **`indexed: false → true` の切り替え deploy の瞬間にスクロール中だったユーザーは
+      エラー画面を見る**(リロードで回復する)。正しい振る舞いは「cursor を捨てて
+      1 ページ目から取り直す」。**上の `ErrorName` の分離が前提**である
+      (`PreconditionFailedError` のままだと ETag の 412 と区別できず、誤って一覧を巻き戻す)
 - [ ] **日本語検索の中間一致。**FTS5 の既定 tokenizer は連続する CJK を 1 トークンにするため、
       `休暇の写真.jpg` は `休暇` では引けるが `写真`(末尾)/ `暇の写`(中間)では引けない。
       **Vectorize(Phase 5)より先に bigram トークン化を試す価値がある**(レポートの「検索」節)

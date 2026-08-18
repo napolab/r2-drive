@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import { ForeignCursorError } from '../errors';
 
-import { listCursor, searchCursor } from './index';
+import { isIndexCursor, listCursor, searchCursor } from './index';
 
 // R2 の opaque token を模した文字列。実際の R2 cursor は base64 系のトークンで
 // ':' を含まないため、タグと衝突しない。切り替え deploy の瞬間にクライアントが
@@ -58,6 +58,29 @@ describe('searchCursor', () => {
 
 // 消費エッジ(errors/responder/foreign-cursor)が message をそのまま返すので、
 // key やバケット名が漏れないことをここで固定する。
+// Ruling 23: R2 経路が「索引の cursor を渡された」ことを検出するための述語。
+// **R2 は不正な cursor を弾かず空ページを返す**(実測)ので、こちら側で弾く必要がある。
+describe('isIndexCursor', () => {
+  it('list / search が発行した cursor を索引由来と判定する', () => {
+    expect(isIndexCursor(listCursor.encode('a/b.txt'))).toBe(true);
+    expect(isIndexCursor(searchCursor.encode('a/b.txt'))).toBe(true);
+  });
+
+  // R2 の cursor は base64(実測: 'cGYvMS50eHQ=' = base64('pf/1.txt'))。
+  // base64 の文字集合に ':' が無いので、タグと衝突しない。
+  it('R2 の cursor を索引由来と誤判定しない', () => {
+    expect(isIndexCursor(R2_LIKE_CURSOR)).toBe(false);
+    expect(isIndexCursor('cGYvMS50eHQ=')).toBe(false);
+    expect(isIndexCursor('')).toBe(false);
+  });
+
+  // タグに似ているが違う文字列を通してしまわないこと。
+  it('タグの途中までしか一致しない文字列は索引由来にしない', () => {
+    expect(isIndexCursor('k1perf/a.txt')).toBe(false);
+    expect(isIndexCursor('k2:perf/a.txt')).toBe(false);
+  });
+});
+
 const decodeSecret = () => listCursor.decode('secret-key-looking-cursor');
 
 describe('ForeignCursorError', () => {
