@@ -217,6 +217,11 @@ export class ObjectIndex extends SqliteStore {
   // を除く。list() 側と同じ Ruling 14 の対応で、除かないと「自分のマーカーだけを含む
   // フォルダ」が非空と誤判定され、開くと空になる(Ruling 2 で潰した幽霊フォルダと
   // 同種の乖離)。list() 本体の `ne(objects.key, input.prefix)` と対にして直すこと。
+  //
+  // この EXISTS が、R2 経路との意図的な非対称(Ruling 24)を生む震源でもある: マーカー
+  // しか無いフォルダは EXISTS が偽になり一覧に出ないが、R2 の delimitedPrefixes は
+  // マーカーの有無を見ずに機械的にフォルダを作るのでここでは出る。修正対象ではない
+  // (test/folder-marker-asymmetry.integration.test.ts のコメント参照)。
   #foldersOf(bucketId: string, prefix: string): readonly FolderDescriptor[] {
     return this.ctx.storage.sql
       .exec<{ prefix: string }>(

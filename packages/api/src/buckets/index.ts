@@ -16,7 +16,18 @@ import type { HonoEnv } from '../env';
 import type { BackfillStatus } from '../object-index/status';
 import type { DriveError, ObjectPage } from '@r2-drive/core';
 
-const listQuery = z.object({ prefix: z.string().default(''), cursor: z.string().optional() });
+// prefix は空文字か末尾 '/' のどちらかしか許さない。R2 経路(r2/list.ts の listObjects)は
+// delimiter: '/' の R2.list() に prefix をそのまま渡すので 'ab' のような末尾なし prefix でも
+// 前方一致で 1 件返るが、索引経路(object-index/index.ts の list)は
+// `eq(objects.parentPrefix, input.prefix)` で完全一致するため、parentPrefix が必ず
+// '/' 終わり(または空文字)である以上、末尾なし prefix には永久にマッチしない
+// (最終レビュー M1、実測: `?prefix=ab` で `abc.txt` を置くと R2 経路は 1 件、索引経路は 0 件)。
+// クライアント(apps/web/src/queries/objects.ts の toPrefix)側の正規化はガードにならない
+// (直接 API を叩けば踏める)ので、両経路が同じ 400 で揃うようここで弾く。
+const listQuery = z.object({ prefix: z.string().default(''), cursor: z.string().optional() }).refine((query) => query.prefix === '' || query.prefix.endsWith('/'), {
+  message: 'prefix must be empty or end with "/"',
+  path: ['prefix'],
+});
 const searchQuery = z.object({ q: z.string().min(1), cursor: z.string().optional() });
 
 // 検索結果は一覧より小さいページで返す。全件を舐める用途ではないため。

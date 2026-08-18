@@ -2,10 +2,10 @@ import { R2OperationError } from '@r2-drive/core';
 import { fromPromise } from 'neverthrow';
 import mime from 'mime';
 
+import { keyPartsOf } from '../object-index/key-parts/index';
+
 import type { DriveError, ObjectPage, Prefix } from '@r2-drive/core';
 import type { ResultAsync } from 'neverthrow';
-
-const nameOf = (key: string): string => key.slice(key.lastIndexOf('/') + 1);
 
 // contentType は常に拡張子から確定させる。R2 に保存済みの httpMetadata は参照しない。
 //
@@ -37,17 +37,22 @@ const listOptionsOf = (input: ListInput): R2ListOptions => ({
   ...(input.cursor === undefined ? {} : { cursor: input.cursor }),
 });
 
+// name は object-index/key-parts/index.ts の keyPartsOf(key).name から導出する。
+// Ruling 16(contentTypeOf の共有)と同じ理由で、2 経路が同じ関数を通るようにする。
+// かつては nameOf(key) = key.slice(key.lastIndexOf('/') + 1) をこのファイルに個別実装
+// していたが、式は keyPartsOf の name の導出と同一で、2 箇所に存在するだけで乖離しうる
+// (contentType がまさにこの構造で一度乖離した。最終レビュー M2)。
 export const listObjects = (input: ListInput): ResultAsync<ObjectPage, DriveError> =>
   fromPromise(input.bucket.list(listOptionsOf(input)), (cause) => new R2OperationError(`list failed: ${input.prefix}`, { cause })).map((listed) => ({
     // delimitedPrefixes が「フォルダ」の正体。ディレクトリという実体は R2 に無い。
-    folders: listed.delimitedPrefixes.map((prefix) => ({ bucketId: input.bucketId, prefix, name: nameOf(prefix.slice(0, -1)) })),
+    folders: listed.delimitedPrefixes.map((prefix) => ({ bucketId: input.bucketId, prefix, name: keyPartsOf(prefix.slice(0, -1)).name })),
     objects: listed.objects
       // prefix そのものを表す 0 バイトのマーカーは一覧に出さない
       .filter((object) => object.key !== input.prefix)
       .map((object) => ({
         bucketId: input.bucketId,
         key: object.key,
-        name: nameOf(object.key),
+        name: keyPartsOf(object.key).name,
         contentType: contentTypeOf(object.key),
         size: object.size,
         uploadedAt: object.uploaded.toISOString(),
