@@ -3,6 +3,7 @@ import { and, asc, count as countRows, eq, gt, ne } from 'drizzle-orm';
 import { contentTypeOf } from '../r2/list';
 import { resolveBucket } from '../r2/registry';
 
+import { listCursor, searchCursor } from './cursor/index';
 import { BucketMismatchError } from './errors';
 import { keyPartsOf } from './key-parts/index';
 import { meta, objects, prefixes } from './schema';
@@ -49,7 +50,8 @@ type Tx = Parameters<Parameters<DrizzleSqliteDODatabase<Record<string, never>>['
 // prefix('a/b/') の親 prefix は、末尾の '/' を落としたキーの親と同じ。
 const parentPrefixOf = (prefix: string): string => keyPartsOf(prefix.slice(0, -1)).parentPrefix;
 
-// cursor は「最後に返した key」。R2 の opaque token と役割が同じなので
+// cursor は「最後に返した key」に経路タグを前置したもの(Ruling 18。cursor/index.ts)。
+// R2 の opaque token と役割が同じでクライアントからは opaque なままなので、
 // ワイヤ型 NextPage は変わらない(spec §6)。bucketId は誤ルーティング検出の guard
 // (meta.bucket_id)とは別物で、list が返す ObjectDescriptor / FolderDescriptor の
 // bucketId は引き続きこの入力から取る(Ruling 11。meta からは読まない)。
@@ -153,11 +155,16 @@ export class ObjectIndex extends SqliteStore {
   // (「prefix そのものを表す 0 バイトのマーカーは一覧に出さない」)で
   // `.filter((object) => object.key !== input.prefix)` しているのと同じ挙動に揃える
   // (Ruling 14)。揃えないと indexed の有無で一覧の中身が変わり、名前が空のエントリが出る。
+  //
+  // cursor は listCursor で往復させる。タグが無い / 別経路のタグが付いた cursor は
+  // ForeignCursorError を投げて弾く(Ruling 18)。**沈黙して先頭から返さないこと。**
+  // 重複したページが出るだけで、利用者は間違いに気付けない。
   list(input: IndexListInput): ObjectPage {
+    const after = input.cursor === undefined ? undefined : listCursor.decode(input.cursor);
     const where =
-      input.cursor === undefined
+      after === undefined
         ? and(eq(objects.parentPrefix, input.prefix), ne(objects.key, input.prefix))
-        : and(eq(objects.parentPrefix, input.prefix), ne(objects.key, input.prefix), gt(objects.key, input.cursor));
+        : and(eq(objects.parentPrefix, input.prefix), ne(objects.key, input.prefix), gt(objects.key, after));
 
     const rows = this.db
       .select()
@@ -169,7 +176,7 @@ export class ObjectIndex extends SqliteStore {
 
     const page = rows.slice(0, input.limit);
     const last = page[page.length - 1];
-    const next: NextPage = rows.length > input.limit && last !== undefined ? { kind: 'more', cursor: last.key } : { kind: 'end' };
+    const next: NextPage = rows.length > input.limit && last !== undefined ? { kind: 'more', cursor: listCursor.encode(last.key) } : { kind: 'end' };
 
     return {
       // フォルダは 1 ページ目だけで出し切る。R2 の delimitedPrefixes もカーソルを
@@ -251,11 +258,16 @@ export class ObjectIndex extends SqliteStore {
   // 空になる条件は他にもありうるので、判定はマーカーの定義そのもの(key が末尾 '/' で
   // 終わる)に置く。除外しないと「一覧では見えないが検索では見える」非対称が生まれ、
   // 検索結果から開けないオブジェクトが出る。
+  //
+  // cursor は searchCursor で往復させる(Ruling 18)。list とはタグが違うので、
+  // 一覧の cursor を検索に渡す / その逆も弾ける。検索は prefix を持たないため、
+  // 取り違えると別フォルダのキーを起点に走査して静かに間違う。
   search(input: IndexSearchInput): ObjectPage {
     const sql = this.ctx.storage.sql;
     const match = this.#ftsQueryOf(input.query);
+    const after = input.cursor === undefined ? undefined : searchCursor.decode(input.cursor);
     const rows =
-      input.cursor === undefined
+      after === undefined
         ? sql
             .exec<ObjectRow>(
               `SELECT o.* FROM objects_fts f JOIN objects o ON o.key = f.key
@@ -271,14 +283,14 @@ export class ObjectIndex extends SqliteStore {
                WHERE f.objects_fts MATCH ? AND o.key NOT LIKE '%/' AND o.key > ?
                ORDER BY o.key LIMIT ?`,
               match,
-              input.cursor,
+              after,
               input.limit + 1,
             )
             .toArray();
 
     const page = rows.slice(0, input.limit);
     const last = page[page.length - 1];
-    const next: NextPage = rows.length > input.limit && last !== undefined ? { kind: 'more', cursor: last.key } : { kind: 'end' };
+    const next: NextPage = rows.length > input.limit && last !== undefined ? { kind: 'more', cursor: searchCursor.encode(last.key) } : { kind: 'end' };
 
     return {
       // 検索結果に階層構造は無い。

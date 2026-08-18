@@ -451,6 +451,81 @@ describe('ObjectIndex の検索', () => {
   });
 });
 
+// Ruling 18: `indexed: false → true` の切り替え deploy を跨いだクライアントは、
+// R2 の opaque cursor を握ったまま索引経路へ次のページを要求する。タグが無いと
+// 索引側は `WHERE key > '<その token>'` として素直に解釈し、**エラーにならず静かに
+// 違うページを返す**(利用者から見れば「ファイルが消えた」)。
+//
+// 一覧で沈黙して間違うのが最悪の失敗モードなので、経路タグの往復と、タグの無い /
+// 違う cursor を拒否することをここで固定する。
+describe('ObjectIndex の cursor の経路タグ(Ruling 18)', () => {
+  // 実際の R2 cursor は base64 系のトークン。タグの区切り ':' を含まない。
+  const R2_LIKE_CURSOR = 'eyJrIjoiYS8xLnR4dCJ9';
+
+  const seed = async (name: string) => {
+    const stub = stubFor(name);
+    await stub.upsert(descriptorOf('a/1.txt'));
+    await stub.upsert(descriptorOf('a/2.txt'));
+
+    return stub;
+  };
+
+  it('list が返す cursor はタグ付きで、そのまま list に返せる', async () => {
+    const stub = await seed('cursor-tag-list-roundtrip');
+
+    const first = await stub.list({ bucketId: 'photos', prefix: 'a/', cursor: undefined, limit: 1 });
+    if (first.next.kind !== 'more') throw new Error('next が more にならなかった');
+    expect(first.next.cursor).toBe('k1:a/1.txt');
+
+    const second = await stub.list({ bucketId: 'photos', prefix: 'a/', cursor: first.next.cursor, limit: 1 });
+    expect(second.objects.map((o) => o.key)).toEqual(['a/2.txt']);
+  });
+
+  it('search が返す cursor はタグ付きで、そのまま search に返せる', async () => {
+    const stub = await seed('cursor-tag-search-roundtrip');
+
+    // key 'a/1.txt' / 'a/2.txt' はどちらも 'a' トークンを持つので 2 件ヒットする。
+    const first = await stub.search({ bucketId: 'photos', query: 'a', cursor: undefined, limit: 1 });
+    if (first.next.kind !== 'more') throw new Error('next が more にならなかった');
+    expect(first.next.cursor).toBe('q1:a/1.txt');
+
+    const second = await stub.search({ bucketId: 'photos', query: 'a', cursor: first.next.cursor, limit: 1 });
+    expect(second.objects.map((o) => o.key)).toEqual(['a/2.txt']);
+  });
+
+  it('list は R2 の opaque cursor を静かに受け付けず ForeignCursorError にする', async () => {
+    const stub = await seed('cursor-tag-list-foreign');
+
+    await expect(async () => stub.list({ bucketId: 'photos', prefix: 'a/', cursor: R2_LIKE_CURSOR, limit: 10 })).rejects.toMatchObject({ name: 'ForeignCursorError' });
+  });
+
+  it('search も R2 の opaque cursor を ForeignCursorError にする', async () => {
+    const stub = await seed('cursor-tag-search-foreign');
+
+    await expect(async () => stub.search({ bucketId: 'photos', query: 'a', cursor: R2_LIKE_CURSOR, limit: 10 })).rejects.toMatchObject({ name: 'ForeignCursorError' });
+  });
+
+  it('list の cursor を search に渡すと弾く(タグを分けている意味)', async () => {
+    const stub = await seed('cursor-tag-cross-list-to-search');
+
+    const first = await stub.list({ bucketId: 'photos', prefix: 'a/', cursor: undefined, limit: 1 });
+    if (first.next.kind !== 'more') throw new Error('next が more にならなかった');
+    const { cursor } = first.next;
+
+    await expect(async () => stub.search({ bucketId: 'photos', query: 'a', cursor, limit: 10 })).rejects.toMatchObject({ name: 'ForeignCursorError' });
+  });
+
+  it('search の cursor を list に渡すと弾く', async () => {
+    const stub = await seed('cursor-tag-cross-search-to-list');
+
+    const first = await stub.search({ bucketId: 'photos', query: 'a', cursor: undefined, limit: 1 });
+    if (first.next.kind !== 'more') throw new Error('next が more にならなかった');
+    const { cursor } = first.next;
+
+    await expect(async () => stub.list({ bucketId: 'photos', prefix: 'a/', cursor, limit: 10 })).rejects.toMatchObject({ name: 'ForeignCursorError' });
+  });
+});
+
 // R2 が真実であり、索引は後付けの読み取り加速層である。バックフィルはその 2 つを
 // 突き合わせて索引を R2 の現在状態に寄せる唯一の手段であり、
 // packages/api/src/uploads/index.ts の multipart complete が「索引書き込みに失敗しても

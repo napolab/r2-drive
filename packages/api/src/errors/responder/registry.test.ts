@@ -1,7 +1,14 @@
 import { ObjectNotFoundError, R2OperationError, UploadSessionError } from '@r2-drive/core';
 import { describe, expect, it } from 'vitest';
 
+import { ForeignCursorError } from '../../object-index/errors';
+
 import { respondTo } from './registry';
+
+// DO の RPC 境界を越えた後の姿。class は失われ Error になるが name / message は残る
+// (実測。foreign-cursor/index.ts のコメント参照)。responder が instanceof ではなく
+// name で判別できていることをここで固定する。
+const asRpcTunneled = (error: Error): Error => Object.assign(new Error(error.message), { name: error.name });
 
 describe('respondTo', () => {
   it('ObjectNotFoundError を 404 にする', () => {
@@ -39,5 +46,27 @@ describe('respondTo', () => {
 
   it('Error ではない値でも 500 を返す', () => {
     expect(respondTo('boom').status).toBe(500);
+  });
+
+  // wire に出る名前は既存の PreconditionFailedError に載せる(packages/core の
+  // ErrorName を増やさないため。foreign-cursor/index.ts のコメント参照)。
+  it('ForeignCursorError を 412 / PreconditionFailedError にする', () => {
+    expect(respondTo(new ForeignCursorError('list'))).toEqual({
+      status: 412,
+      body: { name: 'PreconditionFailedError', message: 'cursor was not issued by the object index list route' },
+    });
+  });
+
+  it('RPC 境界を越えて class が失われた ForeignCursorError も 412 にする', () => {
+    const tunneled = asRpcTunneled(new ForeignCursorError('list'));
+    expect(tunneled).not.toBeInstanceOf(ForeignCursorError);
+
+    expect(respondTo(tunneled).status).toBe(412);
+  });
+
+  it('R2OperationError に包まれた ForeignCursorError も 412 にする(索引経路の実際の形)', () => {
+    const error = new R2OperationError('index list failed: a/', { cause: asRpcTunneled(new ForeignCursorError('list')) });
+
+    expect(respondTo(error).status).toBe(412);
   });
 });
