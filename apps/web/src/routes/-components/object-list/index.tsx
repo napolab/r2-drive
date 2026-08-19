@@ -6,16 +6,14 @@ import { Collection, GridLayout, GridList, GridListItem, GridListLoadMoreItem, S
 import { FilePreviewIcon } from '../../../components/file-icon/index';
 import { resolveFileType } from '../../../plugins/file-type/registry';
 import { toExternalFiles } from '../../../upload/to-external-files/index';
-import { getFolderRowId, getObjectRowId } from './row-id';
+import { getObjectRowId } from './row-id';
 import * as styles from './styles.css';
+import { useStableRows } from './use-stable-rows/index';
 
 import type { FolderDescriptor, ObjectDescriptor } from '@r2-drive/core';
 import type { FocusEvent, KeyboardEvent, SyntheticEvent } from 'react';
 import type { DroppableCollectionRootDropEvent, GridLayoutOptions, Selection } from 'react-aria-components';
-
-// フォルダとオブジェクトを 1 つの union にまとめる。variant が増えたときに
-// ObjectRow の switch がコンパイルエラーになる。
-type Row = { readonly kind: 'folder'; readonly id: string; readonly folder: FolderDescriptor } | { readonly kind: 'object'; readonly id: string; readonly object: ObjectDescriptor };
+import type { Row } from './use-stable-rows/index';
 
 type Props = {
   readonly folders: readonly FolderDescriptor[];
@@ -73,10 +71,7 @@ export const ObjectList = ({
   onLoadMore,
   isLoadingMore,
 }: Props) => {
-  const rows: readonly Row[] = useMemo(
-    () => [...folders.map((folder): Row => ({ kind: 'folder', id: getFolderRowId(folder), folder })), ...objects.map((object): Row => ({ kind: 'object', id: getObjectRowId(object), object }))],
-    [folders, objects],
-  );
+  const rows = useStableRows(folders, objects);
   const objectsByRowId = useMemo(() => new Map(objects.map((object) => [getObjectRowId(object), object])), [objects]);
   const contextTarget = useRef<HTMLElement | undefined>(undefined);
 
@@ -108,7 +103,8 @@ export const ObjectList = ({
     },
     [onExternalFileError, onExternalFiles],
   );
-  const { dragAndDropHooks } = useDragAndDrop<Row>({ acceptedDragTypes: 'all', onRootDrop: handleRootDrop });
+  const dragAndDropOptions = useMemo(() => ({ acceptedDragTypes: 'all' as const, onRootDrop: handleRootDrop }), [handleRootDrop]);
+  const { dragAndDropHooks } = useDragAndDrop<Row>(dragAndDropOptions);
   const rememberContextTarget = useCallback((event: SyntheticEvent) => {
     const target = event.target instanceof Element ? event.target.closest('[data-kind="object"]') : null;
     contextTarget.current = target instanceof HTMLElement ? target : undefined;
