@@ -1,33 +1,29 @@
 import { css } from '@styled/css';
 
-// createCssVariablesTheme(prefix: --shiki-)が参照する変数へ code.* token を配る。
-// constant→number, parameter→fg, string-expression→string, link→function に寄せる
-// (code.* は 7 色。shiki 側の変数のほうが多いので近い役割へ束ねる)。
-const shikiVariables = {
-  '--shiki-foreground': 'token(colors.code.fg)',
-  '--shiki-background': 'token(colors.code.bg)',
-  '--shiki-token-constant': 'token(colors.code.number)',
-  '--shiki-token-string': 'token(colors.code.string)',
-  '--shiki-token-comment': 'token(colors.code.comment)',
-  '--shiki-token-keyword': 'token(colors.code.keyword)',
-  '--shiki-token-parameter': 'token(colors.code.fg)',
-  '--shiki-token-function': 'token(colors.code.function)',
-  '--shiki-token-string-expression': 'token(colors.code.string)',
-  '--shiki-token-punctuation': 'token(colors.code.punctuation)',
-  '--shiki-token-link': 'token(colors.code.function)',
+// shiki の raw theme(apps/web/src/highlight/index.ts)が参照する --code-* 変数へ
+// colors.code.* token を 1:1 で配る。theme の background は transparent なので、
+// この要素の bg(code.bg)がそのままパネルの地色になる。
+const codeVariables = {
+  '--code-fg': 'token(colors.code.fg)',
+  '--code-comment': 'token(colors.code.comment)',
+  '--code-keyword': 'token(colors.code.keyword)',
+  '--code-string': 'token(colors.code.string)',
+  '--code-number': 'token(colors.code.number)',
+  '--code-function': 'token(colors.code.function)',
+  '--code-punctuation': 'token(colors.code.punctuation)',
 } as const;
 
-export const root = css({
-  ...shikiVariables,
+// hast-util-to-jsx-runtime の components.pre が shiki の <pre> を置き換える先。
+export const codeBlock = css({
+  ...codeVariables,
   minW: '[0]',
-  '& pre': {
-    p: 'element',
-    bg: 'code.bg',
-    fontFamily: 'mono',
-    fontSize: 'sm',
-    lineHeight: 'snug',
-    overflowX: 'auto',
-  },
+  p: 'element',
+  bg: 'code.bg',
+  color: 'code.fg',
+  fontFamily: 'mono',
+  fontSize: 'sm',
+  lineHeight: 'snug',
+  overflowX: 'auto',
 });
 
 export const plainPre = css({

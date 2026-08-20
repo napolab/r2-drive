@@ -1,7 +1,11 @@
-import { createCssVariablesTheme, createHighlighterCore } from 'shiki/core';
+import { createHighlighterCore } from 'shiki/core';
 import { createJavaScriptRegexEngine } from 'shiki/engine/javascript';
 
+import { ResultAsync } from 'neverthrow';
+
 import type { HighlighterCore } from 'shiki/core';
+import type { ThemeRegistrationRaw } from '@shikijs/types';
+import type { Root } from 'hast';
 
 // バンドラ制約: dynamic import のパスはリテラルでなければならない。
 // この Record が言語リストの唯一の出典であり、PRELOADED_LANGUAGE_KEYS は
@@ -57,22 +61,57 @@ const resolveLanguage = (value: string): HighlightLanguage | 'text' => {
   return 'text';
 };
 
-// 色は theme に埋めず CSS 変数で受ける。実際の色は code-block/styles.css.ts が
+const CODE_THEME_NAME = 'r2-drive-code';
+
+// TextMate scope を CSS 変数へ直接マップする raw theme(www.napochaan.com の
+// highlighter/index.ts を移植)。色の実値は code-block/styles.css.ts が
 // colors.code.* token から与える(strictTokens と AA テストの保護をハイライトにも通す)。
-const cssVariablesTheme = createCssVariablesTheme({ name: 'css-variables', variablePrefix: '--shiki-', fontStyle: true });
+// background は transparent にして、パネル側の背景(code.bg)を透過させる。
+const CODE_THEME: ThemeRegistrationRaw = {
+  name: CODE_THEME_NAME,
+  type: 'light',
+  settings: [
+    { settings: { foreground: 'var(--code-fg)', background: 'transparent' } },
+    { scope: ['comment', 'punctuation.definition.comment'], settings: { foreground: 'var(--code-comment)' } },
+    {
+      scope: ['keyword', 'storage.type', 'storage.modifier', 'keyword.control', 'keyword.operator'],
+      settings: { foreground: 'var(--code-keyword)' },
+    },
+    {
+      scope: ['string', 'string.quoted', 'punctuation.definition.string', 'constant.other.symbol'],
+      settings: { foreground: 'var(--code-string)' },
+    },
+    { scope: ['constant.numeric', 'constant.language', 'constant.character'], settings: { foreground: 'var(--code-number)' } },
+    {
+      scope: ['entity.name.function', 'support.function', 'meta.function-call', 'entity.name.tag'],
+      settings: { foreground: 'var(--code-function)' },
+    },
+    { scope: ['punctuation', 'meta.brace', 'meta.delimiter'], settings: { foreground: 'var(--code-punctuation)' } },
+  ],
+};
 
 // grammar は積まず theme だけ持って起動する。言語は highlightCode が要求時に load する
 // (loadLanguage は冪等なので都度 await してよい)。
 const highlighterPromise: Promise<HighlighterCore> = createHighlighterCore({
   engine: createJavaScriptRegexEngine(),
-  themes: [cssVariablesTheme],
+  themes: [CODE_THEME],
 });
 
-export const highlightCode = async (code: string, language: string): Promise<string> => {
+export class HighlightError extends Error {
+  override name = 'HighlightError';
+}
+
+const codeToHast = async (code: string, resolved: HighlightLanguage | 'text'): Promise<Root> => {
   const highlighter = await highlighterPromise;
-  const resolved = resolveLanguage(language);
-  if (resolved === 'text') return highlighter.codeToHtml(code, { lang: 'text', theme: 'css-variables' });
+  if (resolved === 'text') return highlighter.codeToHast(code, { lang: 'text', theme: CODE_THEME_NAME });
+
   await highlighter.loadLanguage(LANGUAGE_IMPORTS[resolved]);
 
-  return highlighter.codeToHtml(code, { lang: resolved, theme: 'css-variables' });
+  return highlighter.codeToHast(code, { lang: resolved, theme: CODE_THEME_NAME });
+};
+
+export const highlightCode = (code: string, language: string): ResultAsync<Root, HighlightError> => {
+  const resolved = resolveLanguage(language);
+
+  return ResultAsync.fromPromise(codeToHast(code, resolved), (cause) => new HighlightError('コードのハイライトに失敗しました', { cause }));
 };
