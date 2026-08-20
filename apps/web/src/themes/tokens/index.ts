@@ -233,6 +233,18 @@ export const semanticTokens = defineSemanticTokens({
       border: { value: '{colors.red.9}' },
       spot: { value: '{colors.red.9}' },
     },
+    // syntax highlight 用。www.napochaan.com から移植(注記の比率は gray.3 上での実測)。
+    // teal(195)/ amber(55)は ramp に昇格させない。ramp は 3 本のみ(design-direction)。
+    code: {
+      bg: { value: '{colors.gray.3}' }, // = bg.muted
+      fg: { value: 'oklch(0.260 0.020 265)' }, // 12.2:1 on gray.3
+      comment: { value: 'oklch(0.510 0.017 265)' }, // 4.53:1
+      keyword: { value: 'oklch(0.490 0.287 266)' }, // 5.53:1  electric blue (= blue.9)
+      string: { value: 'oklch(0.470 0.110 195)' }, // 4.83:1  teal
+      number: { value: 'oklch(0.500 0.130 55)' }, // 4.94:1  amber
+      function: { value: 'oklch(0.430 0.230 266)' }, // 6.90:1  deep blue
+      punctuation: { value: 'oklch(0.430 0.018 265)' }, // 6.35:1  grey (= gray.11)
+    },
   },
   spacing: {
     inline: { value: '{spacing.2}' }, // 8px
