@@ -19,7 +19,7 @@ it('ゴースト行: list 後に live remove されたキーはバックフィ�
   await env.BUCKET_PHOTOS.put('race-ghost/victim.txt', 'x');
 
   const stub = indexOf('race-ghost');
-  await stub.setBackfillRace({ kind: 'remove', key: 'race-ghost/victim.txt' });
+  await stub.setBackfillRace({ kind: 'remove', key: 'race-ghost/victim.txt', atCall: 1 });
   await stub.startBackfill('photos');
   await waitForBackfill(stub);
 
@@ -45,7 +45,7 @@ it('スケール上書き: list 後の live upsert より古いスナップシ�
     uploadedAt: '2999-01-01T00:00:00.000Z',
     etag: 'fresher-etag',
   };
-  await stub.setBackfillRace({ kind: 'upsert', descriptor: fresher });
+  await stub.setBackfillRace({ kind: 'upsert', descriptor: fresher, atCall: 1 });
   await stub.startBackfill('photos');
   await waitForBackfill(stub);
 
@@ -59,7 +59,7 @@ it('トゥームストーンはバックフィル完了で消え、以降の再�
   await env.BUCKET_PHOTOS.put('race-tombstone/victim.txt', 'x');
 
   const stub = indexOf('race-tombstone');
-  await stub.setBackfillRace({ kind: 'remove', key: 'race-tombstone/victim.txt' });
+  await stub.setBackfillRace({ kind: 'remove', key: 'race-tombstone/victim.txt', atCall: 1 });
   await stub.startBackfill('photos');
   await waitForBackfill(stub);
 

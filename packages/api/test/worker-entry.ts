@@ -10,9 +10,14 @@ type ObjectRow = typeof objects.$inferSelect;
 type PrefixRow = typeof prefixes.$inferSelect;
 
 // I3 の競合窓をテストから決定的に作るための仕込み。listBackfillPage override が
-// 1 ページ目の list 直後・適用前にちょうど 1 回だけ実行する。structured clone を
+// atCall 回目の list 直後・適用前にちょうど 1 回だけ実行する。structured clone を
 // 越えて RPC 引数として渡すため、関数ではなくデータ(discriminated union)で表す。
-type BackfillRace = { readonly kind: 'none' } | { readonly kind: 'remove'; readonly key: string } | { readonly kind: 'upsert'; readonly descriptor: ObjectDescriptor };
+// atCall はページ番号(1 始まり)。複数ページに跨るバックフィルで「2 ページ目の
+// スナップショットを取った直後」のような、1 ページ目より後の窓を再現するために要る。
+type BackfillRace =
+  | { readonly kind: 'none' }
+  | { readonly kind: 'remove'; readonly key: string; readonly atCall: number }
+  | { readonly kind: 'upsert'; readonly descriptor: ObjectDescriptor; readonly atCall: number };
 
 // テスト専用の DO クラス。production の ObjectIndex に置いてよいのは upsert / remove /
 // count だけで、覗き見用のメソッドや DO SQLite の性質を測る probe を本番の RPC 表面に
@@ -27,23 +32,34 @@ type BackfillRace = { readonly kind: 'none' } | { readonly kind: 'remove'; reado
 // インスタンスに乗るため RPC で公開されない。
 export class ObjectIndexUnderTest extends ObjectIndex {
   #backfillRace: BackfillRace = { kind: 'none' };
+  #listBackfillPageCalls = 0;
 
-  // 次回の listBackfillPage 呼び出しに 1 回だけ効く割り込みを仕込む。
+  // atCall 回目の listBackfillPage 呼び出しに 1 回だけ効く割り込みを仕込む。
   setBackfillRace(race: BackfillRace): void {
     this.#backfillRace = race;
   }
 
-  // I3 の窓の再現: 実際の list を取った直後、ページを索引に適用する前に、仕込んだ
-  // live 操作(remove / upsert)を割り込ませる。使ったら 'none' に戻すので 1 回しか
-  // 効かない(複数ページに渡るテストでは 1 ページ目だけで割り込みが起きる)。
+  // listBackfillPage が実際に呼ばれた回数。「複数ページに跨るバックフィルで、狙った
+  // ページ(2 ページ目以降)まで実際に到達したか」をテストから確認するための窓
+  // (atCall を仕込んだのに 1 ページで終わっていたら、そのテストは何も検証していない)。
+  debugBackfillPageCalls(): number {
+    return this.#listBackfillPageCalls;
+  }
+
+  // I3 の窓の再現: 実際の list を取った直後、そのページを索引に適用する前に、仕込んだ
+  // 割り込み(remove / upsert)を挟む。atCall 回目の呼び出しでだけ発火し、使ったら
+  // 'none' に戻すので 1 回しか効かない。1 ページ目だけでなく任意のページ番号を狙える
+  // ようにしているのは、複数ページに跨るバックフィルでも「N ページ目のスナップ
+  // ショットを取った直後」の窓を決定的に再現するため。
   override async listBackfillPage(bucket: R2Bucket, cursor: string | undefined): Promise<R2Objects> {
     const listed = await super.listBackfillPage(bucket, cursor);
-    const race = this.#backfillRace;
-    this.#backfillRace = { kind: 'none' };
+    this.#listBackfillPageCalls += 1;
 
+    const race = this.#backfillRace;
+    if (race.kind === 'none' || race.atCall !== this.#listBackfillPageCalls) return listed;
+
+    this.#backfillRace = { kind: 'none' };
     switch (race.kind) {
-      case 'none':
-        break;
       case 'remove':
         await bucket.delete(race.key);
         this.remove(race.key);
