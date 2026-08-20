@@ -165,12 +165,11 @@ Phase 0 spec は Phase 1 を「D1 索引」「`ObjectHook` を導入」と書い
 - [ ] **バックフィル中は同じ DO への読み取りが最大 3.2 秒ブロックされる。**10,000 件では
       運用手順(`indexed: false` のままバックフィル → complete 確認 → `true` にして再デプロイ)で
       避けられるが、**100,000 件規模ではバッチ upsert を検討すること**
-- [ ] **I3: バックフィル × delete / upload の競合(次フェーズ冒頭で拾う)。**`#indexPage` の
-      `await bucket.list()` が返すスナップショットは呼び出し時点の R2 の状態であり、その
-      **窓の間に delete が来ると、消えたはずのキーを upsert し直してしまう。**結果、
-      R2 には無いのに索引には残る行(一覧に出るが開けない幽霊)ができる。upload との競合では
-      古い etag / size が索引に焼き付く。**次のバックフィルまで自己修復しない。**
-      テストは `bucket.list` をスタブして窓を作れば書ける
+- [x] **I3: バックフィル × delete / upload の競合(2026-08-20 修正済み)。**`backfill_tombstones`
+      テーブル(running 中の remove を記録しバックフィル適用時にスキップ)+ `#backfillUpsert` の
+      uploadedAt 鮮度ガード(古いスナップショットで新しい行を潰さない)の 2 段構え。
+      `listBackfillPage` を protected シームに抽出し、テストサブクラスで list 直後の割り込みを
+      決定的に再現(単一ページ 4 ケース + ページ境界跨ぎ 1 ケース、backfill-race.integration.test.ts)
 - [ ] **M3: フォルダの返し方が 2 経路で違う(実害は今のところ無い、テスト化されていない)。**
       索引経路は `#foldersOf` が 1 ページ目で全フォルダを出し切るが、R2 経路
       (`delimitedPrefixes`)はページごとに小出しにする。**最終的な和集合は同じなので実害は無いが、
@@ -187,7 +186,7 @@ Phase 0 spec は Phase 1 を「D1 索引」「`ObjectHook` を導入」と書い
 - [ ] **M6: `alarm()` の状態読み出しが try の外にある。**`this.#metaGet(BACKFILL_STATE_KEY)` の
       読み出しが失敗すると 6 回リトライしたのち無記録で沈黙し、`status` が `running` のまま
       固まる。SQLite の同期呼び出しなので現実的には起きにくいが、直すなら try の内側に含めること
-- [ ] **`#foldersOf` の `EXPLAIN QUERY PLAN` 未計測。Phase 2 着手前が期限。**perf 実測
+- [x] **`#foldersOf` の `EXPLAIN QUERY PLAN` 計測済み(reports/2026-08-20-foldersof-explain.md)。**perf 実測
       (reports/2026-08-18-phase-1-index-perf.md)はフォルダのほぼ無い `perf/` で取っており、
       フォルダ数に比例する経路(`#foldersOf` の EXISTS 相関サブクエリ)が 1 度も測られていない
 
