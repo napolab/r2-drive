@@ -24,6 +24,7 @@ type Props = {
   readonly actionNotice: ActionNotice;
   readonly onOpenFolder: (prefix: string) => void;
   readonly onPrefetchFolder: (prefix: string) => void;
+  readonly onOpenObject: (key: string) => void;
   readonly onLoadMore: () => void;
   readonly isLoadingMore: boolean;
 };
@@ -43,6 +44,7 @@ export const BucketWorkspaceUploads = ({
   actionNotice,
   onOpenFolder,
   onPrefetchFolder,
+  onOpenObject,
   onLoadMore,
   isLoadingMore,
 }: Props) => {
@@ -86,6 +88,7 @@ export const BucketWorkspaceUploads = ({
         onObjectContextMenu={onObjectContextMenu}
         onOpenFolder={onOpenFolder}
         onPrefetchFolder={onPrefetchFolder}
+        onOpenObject={onOpenObject}
         onExternalFiles={handleExternalFiles}
         onExternalFileError={handleExternalFileError}
         onLoadMore={onLoadMore}

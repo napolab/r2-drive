@@ -6,3 +6,10 @@ export const root = css({
   h: '[100%]',
   objectFit: 'cover',
 });
+
+export const viewerImage = css({
+  maxW: '[100%]',
+  maxH: '[100%]',
+  objectFit: 'contain',
+  m: 'auto',
+});

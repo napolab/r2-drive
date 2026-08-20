@@ -14,5 +14,5 @@ const OpaquePreview = (_props: PreviewProps) => (
 // 差し替え可能なプラグインにしておくため。
 export const opaquePlugin: FileTypePlugin = {
   id: 'opaque',
-  run: () => ok({ typeId: 'opaque', label: 'ファイル', Icon: (props) => <FileIcon {...props} glyph="blank" />, Preview: OpaquePreview }),
+  run: () => ok({ typeId: 'opaque', label: 'ファイル', Icon: (props) => <FileIcon {...props} glyph="blank" />, Preview: OpaquePreview, capability: { kind: 'opaque' } }),
 };

@@ -26,6 +26,7 @@ type Props = {
   readonly getContentUrl: (object: ObjectDescriptor) => string;
   readonly onOpenFolder: (prefix: string) => void;
   readonly onPrefetchFolder: (prefix: string) => void;
+  readonly onOpenObject: (key: string) => void;
   readonly onLoadMore: () => void;
   readonly isLoadingMore: boolean;
 };
@@ -62,7 +63,7 @@ const getDialogObjects = (state: DeleteDialogState): readonly ObjectDescriptor[]
 
 const getErrorMessage = (error: unknown): string => (error instanceof Error ? error.message : 'ファイル操作に失敗しました');
 
-export const BucketObjectActions = ({ client, bucketId, prefix, folders, objects, getContentUrl, onOpenFolder, onPrefetchFolder, onLoadMore, isLoadingMore }: Props) => {
+export const BucketObjectActions = ({ client, bucketId, prefix, folders, objects, getContentUrl, onOpenFolder, onPrefetchFolder, onOpenObject, onLoadMore, isLoadingMore }: Props) => {
   const queryClient = useQueryClient();
   const queryKey = objectsQuery(client, bucketId, prefix).queryKey;
   const [selectedKeys, setSelectedKeys] = useState<Selection>(new Set());
@@ -176,6 +177,7 @@ export const BucketObjectActions = ({ client, bucketId, prefix, folders, objects
         actionNotice={actionNotice}
         onOpenFolder={onOpenFolder}
         onPrefetchFolder={onPrefetchFolder}
+        onOpenObject={onOpenObject}
         onLoadMore={onLoadMore}
         isLoadingMore={isLoadingMore}
       />

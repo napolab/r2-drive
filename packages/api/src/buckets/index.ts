@@ -9,6 +9,7 @@ import { indexRemove, resolveObjectIndex } from '../object-index/registry';
 import { deleteObject } from '../r2/delete';
 import { resolveObjectSource } from '../plugins/object-source/registry';
 import { getObject } from '../r2/get';
+import { headObject } from '../r2/head';
 import { parseRangeHeader, resolveContentRange } from '../r2/range';
 import { bucketDescriptors, resolveBucket } from '../r2/registry';
 
@@ -172,6 +173,21 @@ export const buckets = new Hono<HonoEnv>()
           (error) => toErrorResponse(c, error),
         );
       },
+      async (error) => toErrorResponse(c, error),
+    );
+  })
+  // deep link(?view=<key>)でビューアを直接開いたときの descriptor 解決用。
+  // 2 番目のセグメントが 'objects' + splat。'/:bucketId/objects'(完全一致)とは衝突しない。
+  .get('/:bucketId/objects/:path{.+}', async (c) => {
+    const key = c.req.param('path');
+    const bucketId = c.req.param('bucketId');
+
+    return resolveBucket(c.env, bucketId).match(
+      async (bucket) =>
+        headObject(bucket, bucketId, key).match(
+          (descriptor) => c.json(descriptor, 200),
+          (error) => toErrorResponse(c, error),
+        ),
       async (error) => toErrorResponse(c, error),
     );
   })

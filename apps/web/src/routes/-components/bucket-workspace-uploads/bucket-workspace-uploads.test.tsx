@@ -61,6 +61,7 @@ const renderWorkspace = (uppy: R2Uploader) =>
         actionNotice={{ kind: 'none' }}
         onOpenFolder={() => undefined}
         onPrefetchFolder={() => undefined}
+        onOpenObject={() => undefined}
         onLoadMore={() => undefined}
         isLoadingMore={false}
       />

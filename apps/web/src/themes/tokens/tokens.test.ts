@@ -92,9 +92,14 @@ describe('motion tokens', () => {
 // Semantic tokens hold *reference* strings like '{colors.gray.1}', not raw
 // oklch values. `contrastRatio` only understands oklch strings, so resolve the
 // reference against the primitive `tokens.colors` scale before checking it.
+// Literals (e.g. 'oklch(0.260 0.020 265)') are passed through unchanged.
 const resolve = (ref: string): string => {
   const m = ref.match(/\{colors\.(\w+)\.(\d+)\}/);
-  if (m === null) throw new Error(`unresolvable: ${ref}`);
+  if (m === null) {
+    // If it looks like a literal oklch value, pass it through
+    if (ref.startsWith('oklch(')) return ref;
+    throw new Error(`unresolvable: ${ref}`);
+  }
   const group = m[1];
   const step = m[2];
   if (group === undefined || step === undefined) throw new Error(`unresolvable: ${ref}`);
@@ -149,4 +154,19 @@ describe('semantic tokens WCAG AA (light theme)', () => {
   it('danger.spot preserves the vivid decorative red (red-9)', () => {
     expect(sem('danger.spot')).toBe('{colors.red.9}');
   });
+});
+
+describe('code tokens WCAG AA (on code.bg = gray.3)', () => {
+  const codeBg = val('gray', 3);
+  const textKeys = ['fg', 'comment', 'keyword', 'string', 'number', 'function', 'punctuation'] as const;
+
+  it('code.bg is gray.3 (= bg.muted)', () => {
+    expect(resolve(sem('code.bg'))).toBe(codeBg);
+  });
+
+  for (const key of textKeys) {
+    it(`code.${key} on code.bg >= 4.5`, () => {
+      expect(contrastRatio(resolve(sem(`code.${key}`)), codeBg)).toBeGreaterThanOrEqual(4.5);
+    });
+  }
 });

@@ -25,3 +25,10 @@ describe('audioPlugin preview', () => {
     expect(container.querySelector('svg')?.dataset.glyph).toBe('audio');
   });
 });
+
+describe('audioPlugin capability', () => {
+  it('audio は view capability を持つ', () => {
+    const result = audioPlugin.run(object);
+    expect(result.isOk() && result.value.capability.kind).toBe('view');
+  });
+});

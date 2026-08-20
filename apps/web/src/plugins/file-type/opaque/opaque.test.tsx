@@ -25,4 +25,9 @@ describe('opaquePlugin preview', () => {
     expect(container.querySelector('svg')?.dataset.glyph).toBe('blank');
     expect(container.querySelector('svg')?.getAttribute('width')).toBe('72');
   });
+
+  it('opaque は opaque capability を持つ', () => {
+    const result = opaquePlugin.run(object);
+    expect(result.isOk() && result.value.capability.kind).toBe('opaque');
+  });
 });
