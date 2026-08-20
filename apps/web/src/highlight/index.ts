@@ -27,6 +27,36 @@ export const PRELOADED_LANGUAGE_KEYS = Object.keys(LANGUAGE_IMPORTS) as readonly
 
 export const isHighlightLanguage = (value: string): value is HighlightLanguage => value in LANGUAGE_IMPORTS;
 
+// markdown コードフェンスは ```ts / ```js のような短縮/別名を使うことが多い。
+// 値は LANGUAGE_IMPORTS のキーに限定される(Record<string, HighlightLanguage> で
+// 型的に、highlight.test.ts の sync テストで実行時に固定する)。
+// isHighlightLanguage / HighlightLanguage の既存の意味(= LANGUAGE_IMPORTS の
+// キーそのものか)は変えない。別名解決は resolveLanguage 側だけの責務にする
+// (text プラグインの EXTENSION_LANGUAGES はこの表を経由しない、拡張子は最初から
+// 正式名で書かれているため)。
+export const LANGUAGE_ALIASES = {
+  ts: 'typescript',
+  mts: 'typescript',
+  cts: 'typescript',
+  js: 'javascript',
+  mjs: 'javascript',
+  cjs: 'javascript',
+  yml: 'yaml',
+  sh: 'bash',
+  shell: 'bash',
+  zsh: 'bash',
+  md: 'markdown',
+} as const satisfies Record<string, HighlightLanguage>;
+
+const isHighlightLanguageAlias = (value: string): value is keyof typeof LANGUAGE_ALIASES => value in LANGUAGE_ALIASES;
+
+const resolveLanguage = (value: string): HighlightLanguage | 'text' => {
+  if (isHighlightLanguage(value)) return value;
+  if (isHighlightLanguageAlias(value)) return LANGUAGE_ALIASES[value];
+
+  return 'text';
+};
+
 // 色は theme に埋めず CSS 変数で受ける。実際の色は code-block/styles.css.ts が
 // colors.code.* token から与える(strictTokens と AA テストの保護をハイライトにも通す)。
 const cssVariablesTheme = createCssVariablesTheme({ name: 'css-variables', variablePrefix: '--shiki-', fontStyle: true });
@@ -40,8 +70,9 @@ const highlighterPromise: Promise<HighlighterCore> = createHighlighterCore({
 
 export const highlightCode = async (code: string, language: string): Promise<string> => {
   const highlighter = await highlighterPromise;
-  if (!isHighlightLanguage(language)) return highlighter.codeToHtml(code, { lang: 'text', theme: 'css-variables' });
-  await highlighter.loadLanguage(LANGUAGE_IMPORTS[language]);
+  const resolved = resolveLanguage(language);
+  if (resolved === 'text') return highlighter.codeToHtml(code, { lang: 'text', theme: 'css-variables' });
+  await highlighter.loadLanguage(LANGUAGE_IMPORTS[resolved]);
 
-  return highlighter.codeToHtml(code, { lang: language, theme: 'css-variables' });
+  return highlighter.codeToHtml(code, { lang: resolved, theme: 'css-variables' });
 };
