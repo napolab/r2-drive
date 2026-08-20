@@ -9,11 +9,18 @@
   // Access は Worker の前段にいるだけなので、workers.dev に直接叩かれると素通りする。
   // 受け入れ基準 5。絶対に true にしないこと。
   "workers_dev": false,
+  // デプロイ先アカウント。wrangler に複数アカウントが紐づいている場合は必須。
+  "account_id": "REPLACE_WITH_ACCOUNT_ID",
+  // 公開ホスト名。workers_dev: false なので custom domain(または route)が無いと到達不能。
+  "routes": [{ "pattern": "drive.example.com", "custom_domain": true }],
   // IDENTITY_PROVIDER は fail-closed にする(Ruling 8)。既定は "access" で、
   // ローカル開発だけ .dev.vars で "static" に落とす。設定を忘れたときに
   // 「認証が無効」ではなく「認証が有効」に倒れる側を既定にしておく。
   "vars": {
     // Cloudflare Zero Trust のチーム名(<team>.cloudflareaccess.com の <team> の部分)。
+    // **実チーム名と違うと、Access を通った後の JWT 検証が別チームの証明書を見に行き、
+    // 認証済みリクエストが全 401 になる。**未認証アクセスの 302 リダイレクト先ホスト名で
+    // 実チーム名を確認できる(実測 2026-08-20)。
     "ACCESS_TEAM": "REPLACE_WITH_ACCESS_TEAM",
     // Zero Trust ダッシュボードのアプリケーション AUD タグ。
     // プレースホルダのままデプロイすると全リクエストが 401 になる(fail-closed なので想定通り)。
