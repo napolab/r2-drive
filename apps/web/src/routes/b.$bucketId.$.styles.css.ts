@@ -37,6 +37,44 @@ export const heading = css({
   whiteSpace: 'nowrap',
 });
 
+export const headerActionsRoot = css({
+  display: 'flex',
+  alignItems: 'center',
+  gap: 'element',
+});
+
+// トグルの選択状態はコンポーネントの存在(押されている方)を示すだけの色替えなので
+// 境界そのものは border.interactive(design-direction「境界線には 2 種類ある」)。
+export const viewModeToggleRoot = css({
+  display: 'flex',
+  borderWidth: 'hairline',
+  borderStyle: 'solid',
+  borderColor: 'border.interactive',
+  borderRadius: 'none',
+});
+
+export const viewModeToggleButton = css({
+  display: 'inline-flex',
+  alignItems: 'center',
+  minH: 'targetComfortable',
+  px: 'element',
+  color: 'fg.default',
+  bg: 'bg.canvas',
+  fontFamily: 'mono',
+  fontSize: 'xs',
+  fontWeight: 'medium',
+  cursor: 'pointer',
+  '&:nth-child(1)': { borderRightWidth: 'hairline', borderRightStyle: 'solid', borderRightColor: 'border.interactive' },
+  '&[data-hovered]:not([data-selected])': { bg: 'bg.subtle' },
+  '&[data-selected]': { bg: 'accent.solid', color: 'fg.onSolid' },
+  '&[data-focus-visible]': { layerStyle: 'focusRing' },
+});
+
+// GalleryView の直下ラッパ。Delete/Backspace の keydown capture だけを足すための
+// もので、display: contents で自身はレイアウトボックスを作らない — object-list の
+// focusScope と同じ理由(親 grid の直接の子は GalleryView 自身の root であるべき)。
+export const gallerySelectionScope = css({ display: 'contents' });
+
 export const uploadError = css({
   color: 'danger.text',
   fontSize: 'sm',

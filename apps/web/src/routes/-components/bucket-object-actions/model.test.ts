@@ -1,3 +1,4 @@
+import { NO_MEDIA } from '@r2-drive/core';
 import { describe, expect, it } from 'vitest';
 
 import { getContextSelection, removeObjectsFromPages, resolveSelectedRows } from './model';
@@ -15,6 +16,7 @@ const objects: readonly ObjectDescriptor[] = ['a.txt', 'b.txt', 'c.txt'].map((ke
   size: 10,
   uploadedAt: '2026-08-14T00:00:00.000Z',
   etag: key,
+  media: NO_MEDIA,
 }));
 const [firstObject, secondObject] = objects;
 const [firstFolder] = folders;

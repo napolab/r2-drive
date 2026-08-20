@@ -1,3 +1,4 @@
+import { NO_MEDIA } from '@r2-drive/core';
 import { env } from 'cloudflare:test';
 import { expect, it } from 'vitest';
 
@@ -44,6 +45,7 @@ it('スケール上書き: list 後の live upsert より古いスナップシ�
     size: 999,
     uploadedAt: '2999-01-01T00:00:00.000Z',
     etag: 'fresher-etag',
+    media: NO_MEDIA,
   };
   await stub.setBackfillRace({ kind: 'upsert', descriptor: fresher, atCall: 1 });
   await stub.startBackfill('photos');
@@ -74,6 +76,7 @@ it('トゥームストーンはバックフィル完了で消え、以降の再�
     size: 1,
     uploadedAt: new Date().toISOString(),
     etag: 'revived-etag',
+    media: NO_MEDIA,
   };
   await stub.upsert(revived);
 
@@ -90,6 +93,7 @@ it('バックフィルが走っていないときの remove() はトゥームス
     size: 1,
     uploadedAt: new Date().toISOString(),
     etag: 'e',
+    media: NO_MEDIA,
   };
   await stub.upsert(seeded);
   await expect(stub.status()).resolves.toMatchObject({ kind: 'idle' });

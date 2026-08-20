@@ -1,10 +1,20 @@
+import { NO_MEDIA } from '@r2-drive/core';
 import { describe, expect, it } from 'vitest';
 
 import { findAdjacentViewable } from './index';
 
 import type { ObjectDescriptor } from '@r2-drive/core';
 
-const make = (key: string, contentType: string): ObjectDescriptor => ({ bucketId: 'b', key, name: key, contentType, size: 1, uploadedAt: '2026-01-01T00:00:00.000Z', etag: '"x"' });
+const make = (key: string, contentType: string): ObjectDescriptor => ({
+  bucketId: 'b',
+  key,
+  name: key,
+  contentType,
+  size: 1,
+  uploadedAt: '2026-01-01T00:00:00.000Z',
+  etag: '"x"',
+  media: NO_MEDIA,
+});
 
 // a.png(view)→ b.bin(opaque)→ c.jpg(view)→ d.bin(opaque)
 const objects = [make('a.png', 'image/png'), make('b.bin', 'application/octet-stream'), make('c.jpg', 'image/jpeg'), make('d.bin', 'application/octet-stream')];

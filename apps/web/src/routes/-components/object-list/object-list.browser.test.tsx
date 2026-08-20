@@ -1,3 +1,4 @@
+import { NO_MEDIA } from '@r2-drive/core';
 import { flushSync } from 'react-dom';
 import { createRoot } from 'react-dom/client';
 import { expect, it } from 'vitest';
@@ -18,6 +19,7 @@ const objects: readonly ObjectDescriptor[] = [
     size: 10,
     uploadedAt: '2026-08-14T00:00:00.000Z',
     etag: 'short',
+    media: NO_MEDIA,
   },
   {
     bucketId: 'photos',
@@ -27,6 +29,7 @@ const objects: readonly ObjectDescriptor[] = [
     size: 20,
     uploadedAt: '2026-08-14T00:00:00.000Z',
     etag: 'long',
+    media: NO_MEDIA,
   },
 ];
 

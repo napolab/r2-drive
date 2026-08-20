@@ -1,4 +1,4 @@
-import { ObjectNotFoundError, R2OperationError } from '@r2-drive/core';
+import { NO_MEDIA, ObjectNotFoundError, R2OperationError } from '@r2-drive/core';
 import { errAsync, fromPromise, okAsync } from 'neverthrow';
 
 import { keyPartsOf } from '../object-index/key-parts/index';
@@ -19,5 +19,7 @@ export const headObject = (bucket: R2Bucket, bucketId: string, key: string): Res
           size: head.size,
           uploadedAt: head.uploaded.toISOString(),
           etag: head.httpEtag,
+          // R2 は寸法を知らない。索引列からの導出は Task 2。
+          media: NO_MEDIA,
         }),
   );

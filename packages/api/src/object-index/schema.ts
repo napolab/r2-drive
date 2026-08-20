@@ -11,6 +11,11 @@ export const objects = sqliteTable(
     size: integer('size').notNull(),
     uploadedAt: text('uploaded_at').notNull(),
     etag: text('etag').notNull(),
+    // 画像でなければ、あるいはまだ寸法を知らなければ NULL のまま(NOT NULL を付けない)。
+    // list()/search() は mediaOf(row.width, row.height) を通して MediaFacts に変換する
+    // (Task 1 の mediaOf が null/undefined/非正数を variant:'none' に落とす)。
+    width: integer('width'),
+    height: integer('height'),
   },
   (table) => [index('objects_by_folder').on(table.parentPrefix, table.key)],
 );
@@ -48,7 +53,9 @@ export const DDL: readonly string[] = [
      content_type TEXT NOT NULL,
      size INTEGER NOT NULL,
      uploaded_at TEXT NOT NULL,
-     etag TEXT NOT NULL
+     etag TEXT NOT NULL,
+     width INTEGER,
+     height INTEGER
    )`,
   `CREATE INDEX IF NOT EXISTS objects_by_folder ON objects (parent_prefix, key)`,
   `CREATE TABLE IF NOT EXISTS prefixes (
@@ -59,4 +66,13 @@ export const DDL: readonly string[] = [
   `CREATE VIRTUAL TABLE IF NOT EXISTS objects_fts USING fts5(key, name)`,
   `CREATE TABLE IF NOT EXISTS meta (k TEXT PRIMARY KEY, v TEXT)`,
   `CREATE TABLE IF NOT EXISTS backfill_tombstones (key TEXT PRIMARY KEY)`,
+];
+
+// 既存 DO への後付け列。SQLite に ADD COLUMN IF NOT EXISTS は無いので、
+// 適用側(SqliteStore)が PRAGMA table_info で列の有無を見てから流す。
+// 新規 DO は上の DDL の CREATE TABLE に width/height が既に含まれているので、
+// このリストは「Task 2 より前に作られた DO」を追いつかせるためだけに存在する。
+export const OBJECTS_MEDIA_COLUMNS: readonly { readonly name: string; readonly ddl: string }[] = [
+  { name: 'width', ddl: `ALTER TABLE objects ADD COLUMN width INTEGER` },
+  { name: 'height', ddl: `ALTER TABLE objects ADD COLUMN height INTEGER` },
 ];

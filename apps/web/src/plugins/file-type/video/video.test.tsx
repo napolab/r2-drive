@@ -1,3 +1,4 @@
+import { NO_MEDIA } from '@r2-drive/core';
 import { cleanup, render } from '@testing-library/react';
 import { afterEach, describe, expect, it } from 'vitest';
 
@@ -15,6 +16,7 @@ const object: ObjectDescriptor = {
   size: 1,
   uploadedAt: '2026-08-14T00:00:00.000Z',
   etag: 'video',
+  media: NO_MEDIA,
 };
 
 describe('videoPlugin preview', () => {

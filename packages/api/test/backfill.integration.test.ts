@@ -34,7 +34,7 @@ it('走らせきると status が complete と件数を返す', async () => {
 
   const res = await api.request('/buckets/media/index/status', {}, env);
   expect(res.status).toBe(200);
-  await expect(res.json()).resolves.toEqual({ kind: 'complete', indexed: 1 });
+  await expect(res.json()).resolves.toEqual({ kind: 'complete', indexed: 1, mediaPending: 0 });
 });
 
 it('存在しないバケットの status は 404', async () => {

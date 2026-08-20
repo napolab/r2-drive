@@ -20,6 +20,21 @@ import type { ObjectIndexUnderTest } from './worker-entry';
 // ページを舐め直して truncated のまま次の alarm を予約し続けるので、running から
 // 永久に抜けずここで落ちる。個別のテストが timeout を延ばしていなければ vitest 既定の
 // 5s が先に落とすが、どちらでも変異は検出できる。
+//
+// Task 5: 索引フェーズの complete は media 追い掛けフェーズの入口にすぎない
+// (#indexPage が complete を書いた直後、mediaPending > 0 なら続けて alarm を予約する)。
+// 索引フェーズの complete だけを見て抜けると、mediaPending が残ったまま後続のアサーション
+// が走ってしまう。よって「running」または「complete かつ mediaPending が残っている」間は
+// 待ち続ける。failed / idle は待たずに抜ける(従来どおり、回復不能な状態で無限に待たせない)。
 export const waitForBackfill = async (stub: DurableObjectStub<ObjectIndexUnderTest>): Promise<void> => {
-  await expect.poll(async () => (await stub.status()).kind === 'running', { timeout: 20_000 }).toBe(false);
+  await expect
+    .poll(
+      async () => {
+        const status = await stub.status();
+
+        return status.kind === 'running' || (status.kind === 'complete' && status.mediaPending > 0);
+      },
+      { timeout: 20_000 },
+    )
+    .toBe(false);
 };

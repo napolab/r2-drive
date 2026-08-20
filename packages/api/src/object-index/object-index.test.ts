@@ -1,10 +1,11 @@
+import { NO_MEDIA } from '@r2-drive/core';
 import { env, runInDurableObject } from 'cloudflare:test';
 import { describe, expect, it } from 'vitest';
 
 import { objectIndexNamespace } from '../../test/object-index-namespace';
 import { waitForBackfill } from '../../test/wait-for-backfill';
 
-import { BACKFILL_PAGES_KEY, BUCKET_ID_KEY } from './index';
+import { BACKFILL_BUCKET_ID_KEY, BACKFILL_PAGES_KEY, BACKFILL_STATE_KEY, BUCKET_ID_KEY } from './index';
 
 import type { ObjectDescriptor } from '@r2-drive/core';
 
@@ -16,6 +17,7 @@ const descriptorOf = (key: string, overrides: Partial<ObjectDescriptor> = {}): O
   size: 10,
   uploadedAt: '2026-08-17T00:00:00.000Z',
   etag: `"etag-${key}"`,
+  media: NO_MEDIA,
   ...overrides,
 });
 
@@ -46,6 +48,8 @@ describe('ObjectIndex の書き込み', () => {
       size: 999,
       uploadedAt: '2026-08-17T00:00:00.000Z',
       etag: '"new"',
+      width: null,
+      height: null,
     });
   });
 
@@ -559,7 +563,7 @@ describe('ObjectIndex のバックフィル', () => {
 
     const listed = await env.BUCKET_PHOTOS.list({ limit: 1000 });
     expect(listed.truncated).toBe(false);
-    await expect(stub.status()).resolves.toEqual({ kind: 'complete', indexed: listed.objects.length });
+    await expect(stub.status()).resolves.toEqual({ kind: 'complete', indexed: listed.objects.length, mediaPending: 0 });
     await expect(stub.debugRow('bf/a/3.txt')).resolves.toMatchObject({ name: '3.txt', parentPrefix: 'bf/a/' });
   });
 
@@ -590,7 +594,7 @@ describe('ObjectIndex のバックフィル', () => {
     await waitForBackfill(stub);
 
     await expect(stub.count()).resolves.toBe(first);
-    await expect(stub.status()).resolves.toEqual({ kind: 'complete', indexed: first });
+    await expect(stub.status()).resolves.toEqual({ kind: 'complete', indexed: first, mediaPending: 0 });
   });
 
   // startBackfill は meta に backfill_* を書くが、bucket_id(Ruling 11 の誤ルーティング
@@ -661,6 +665,32 @@ describe('ObjectIndex のバックフィル', () => {
     // 「止める」側を実際に張る。予約が残っていると 6 回のリトライを無駄に消費した末に
     // 何の記録も残さず消える。
     await expect(stub.debugAlarm()).resolves.toBeNull();
+  });
+
+  // レビュー指摘(Task 5 フォローアップ): media 追い掛けフェーズ中のバケット解決失敗は、
+  // 上のテスト(索引フェーズの失敗)とは意図的に非対称 — 索引フェーズを failed に
+  // 巻き込んではいけない。索引本体は健全なのに complete → failed へ落ちると、
+  // (1) mediaPending の可視性が消え、(2) 回復手段がフル再スキャンだけになり、
+  // (3)「indexed:true への切り替えは status を見て決める」という運用判断を誤らせる。
+  //
+  // 実際にバックフィルを完走させて到達するには時間がかかるので、「索引フェーズは
+  // complete 済み・画像 1 件が寸法未抽出」の状態を debugSetMeta で直接組み立て、
+  // backfill_bucket_id だけを壊れた値にすり替えて alarm() を直接叩く。
+  it('media チェイス中のバケット解決失敗は索引の complete を巻き込まない', async () => {
+    const stub = stubFor('media-chase-stall');
+    await stub.upsert(descriptorOf('media-chase/a.jpg', { contentType: 'image/jpeg' }));
+
+    await runInDurableObject(stub, async (instance) => {
+      instance.debugSetMeta(BACKFILL_STATE_KEY, 'complete');
+      instance.debugSetMeta(BACKFILL_BUCKET_ID_KEY, 'no-such-bucket');
+    });
+    await expect(stub.status()).resolves.toEqual({ kind: 'complete', indexed: 1, mediaPending: 1 });
+
+    await runInDurableObject(stub, async (instance) => instance.alarm());
+
+    // failed に落ちていない。mediaPending が 1 のまま凍結されているのが「詰まっている」の
+    // 可視化そのもの(このテストが担保する契約)。
+    await expect(stub.status()).resolves.toEqual({ kind: 'complete', indexed: 1, mediaPending: 1 });
   });
 
   // 運用手順「status を見る → 原因を直す → backfill を叩き直す」を固定する。

@@ -1,5 +1,7 @@
-import { and, asc, count as countRows, eq, gt, ne } from 'drizzle-orm';
+import { mediaOf, NO_MEDIA } from '@r2-drive/core';
+import { and, asc, count as countRows, eq, gt, isNull, like, ne } from 'drizzle-orm';
 
+import { probeImageDimensions } from '../media/dimensions';
 import { contentTypeOf } from '../r2/list';
 import { resolveBucket } from '../r2/registry';
 
@@ -20,9 +22,13 @@ export const BUCKET_ID_KEY = 'bucket_id';
 // 同じ表を共有するので、キー名を backfill_ で名前空間化して衝突を避ける。
 // **meta を一括クリアする操作を書かないこと。**bucket_id ごと消えると guard が静かに
 // 無効になり、誤ルーティングした upsert が通ってしまう。触るときは必ずキー単位で触る。
-const BACKFILL_STATE_KEY = 'backfill_state';
+// テストが「索引 complete / media チェイス中の失敗」のような状態機械の分岐を、実際に
+// バックフィルを完走させずに直接組み立てるための export(object-index.test.ts の
+// debugSetMeta と対で使う)。production コードからは引き続きこのファイル内でしか
+// 参照しない。
+export const BACKFILL_STATE_KEY = 'backfill_state';
 const BACKFILL_CURSOR_KEY = 'backfill_cursor';
-const BACKFILL_BUCKET_ID_KEY = 'backfill_bucket_id';
+export const BACKFILL_BUCKET_ID_KEY = 'backfill_bucket_id';
 const BACKFILL_REASON_KEY = 'backfill_reason';
 
 // 処理したページ数。運用上の意味は「何往復かかったか」だが、主目的は Ruling 20 の
@@ -42,6 +48,12 @@ export const BACKFILL_PAGES_KEY = 'backfill_pages';
 // Ruling 20: 索引に書く contentType は contentTypeOf(key)(拡張子由来)なので
 // httpMetadata は要らない。include を付けないことがそのまま往復数 10 分の 1 になる。
 const BACKFILL_PAGE = 1000;
+
+// 索引フェーズ complete 後の media 追い掛けフェーズで、1 alarm あたりに抽出する
+// 画像行数。索引の BACKFILL_PAGE(R2 list の上限)とは別物 — こちらは R2 の
+// range get(probeImageDimensions)を 1 件ずつ直列で叩くため、同じ大きさにすると
+// 1 alarm が長時間化する。
+const MEDIA_CHASE_BATCH = 50;
 
 // db.transaction() のコールバックが受け取る tx。Drizzle は型名を公開していないので
 // database 型から引き出す。
@@ -79,6 +91,8 @@ type ObjectRow = {
   readonly size: number;
   readonly uploaded_at: string;
   readonly etag: string;
+  readonly width: number | null;
+  readonly height: number | null;
 };
 
 export class ObjectIndex extends SqliteStore {
@@ -98,8 +112,13 @@ export class ObjectIndex extends SqliteStore {
   // object.name は保存しない。name は key から一意に決まる派生値なので、
   // keyPartsOf(key).name を唯一の出典にする(呼び出し側が矛盾した name を渡しても
   // 索引は key に従う)。
+  //
+  // media が 'none' のときは width/height 列を updates に含めない(触らない)。
+  // 再アップロードや再バックフィルで寸法未知の descriptor が来ても、setMediaFacts が
+  // 後から埋めた既存値を上書きで消さないようにするため(brief のテスト 4 番目)。
   upsert(object: ObjectDescriptor): void {
     const { name, parentPrefix, ancestorPrefixes } = keyPartsOf(object.key);
+    const mediaUpdates = object.media.kind === 'image' ? { width: object.media.width, height: object.media.height } : {};
     const updates = {
       name,
       parentPrefix,
@@ -107,6 +126,7 @@ export class ObjectIndex extends SqliteStore {
       size: object.size,
       uploadedAt: object.uploadedAt,
       etag: object.etag,
+      ...mediaUpdates,
     };
 
     this.db.transaction((tx) => {
@@ -137,6 +157,16 @@ export class ObjectIndex extends SqliteStore {
       this.ctx.storage.sql.exec(`DELETE FROM objects_fts WHERE key = ?`, key);
       this.#tombstoneIfBackfillRunning(tx, key);
     });
+  }
+
+  // 寸法の後付け(ObjectHook の mediaFacts / バックフィルの追い掛けが使う。Task 4-5)。
+  // 行が無ければ何もしない: 抽出中に削除されたキーへの UPDATE は 0 行更新で終わるのが
+  // 正しい(消えたキーへの後追いを例外にしない)。0 を弾かない — Task 5 は 0/0 を
+  // 「試したが寸法が取れなかった」マーカーとして書く。ワイヤ境界(0 以下は
+  // variant:'none' に落とす)の判定は列に書く側ではなく mediaOf(list/search の読み取り側)
+  // が単独で持つ(CQS: これはコマンドなので void を返す)。
+  setMediaFacts(key: string, width: number, height: number): void {
+    this.db.update(objects).set({ width, height }).where(eq(objects.key, key)).run();
   }
 
   // バックフィル走行中(meta.backfill_state === 'running')の remove だけトゥームストーンを
@@ -205,6 +235,7 @@ export class ObjectIndex extends SqliteStore {
         size: row.size,
         uploadedAt: row.uploadedAt,
         etag: row.etag,
+        media: mediaOf(row.width, row.height),
       })),
       next,
     };
@@ -323,6 +354,7 @@ export class ObjectIndex extends SqliteStore {
         size: row.size,
         uploadedAt: row.uploaded_at,
         etag: row.etag,
+        media: mediaOf(row.width, row.height),
       })),
       next,
     };
@@ -340,7 +372,7 @@ export class ObjectIndex extends SqliteStore {
       case 'running':
         return { kind: 'running', indexed: this.count() };
       case 'complete':
-        return { kind: 'complete', indexed: this.count() };
+        return { kind: 'complete', indexed: this.count(), mediaPending: this.#mediaPendingCount() };
       case 'failed':
         return { kind: 'failed', indexed: this.count(), reason: this.#metaGet(BACKFILL_REASON_KEY) ?? 'unknown' };
       default:
@@ -391,6 +423,11 @@ export class ObjectIndex extends SqliteStore {
   //
   // 1 回の alarm で 1 ページだけ処理し、続きがあれば次の alarm を予約する。10,000 件を
   // 1 回の alarm に押し込まないためと、途中で落ちてもカーソル位置から再開できるため。
+  //
+  // 状態機械は 3 分岐: 'running' なら従来どおり索引フェーズを 1 ページ進める。
+  // 索引フェーズが complete していて、かつ寸法未抽出の画像(mediaPending)が残って
+  // いれば media 追い掛けフェーズ(#chaseMediaFacts)に振り向ける。どちらでもなければ
+  // (idle / failed / complete かつ mediaPending 0)何もせず return する。
   override async alarm(): Promise<void> {
     // **状態で弾くこと。**backfill_bucket_id は complete / failed の後も消さない
     // (どのバケットを索引したかの記録として意味があり、次の startBackfill が上書きする)
@@ -401,17 +438,37 @@ export class ObjectIndex extends SqliteStore {
     // 判断を誤らせるので深刻である(indexed: true への切り替えは status を見て決める)。
     //
     // startBackfill は setAlarm より前に running を書くので、この順序は安全である。
-    if (this.#metaGet(BACKFILL_STATE_KEY) !== 'running') return;
+    const state = this.#metaGet(BACKFILL_STATE_KEY);
+    if (state !== 'running' && !(state === 'complete' && this.#mediaPendingCount() > 0)) return;
 
     const bucketId = this.#metaGet(BACKFILL_BUCKET_ID_KEY);
-    // running なら startBackfill が必ず書いている。型の都合で残す guard。
+    // running / complete なら startBackfill が必ず書いている。型の都合で残す guard。
     if (bucketId === undefined) return;
 
     // alarm は消費エッジなので、ここで Result を畳んでよい。
     return resolveBucket(this.env, bucketId).match(
-      async (bucket) => this.#indexPage(bucketId, bucket),
-      // バケット定義や binding が消えている場合。リトライしても回復しないので即座に止める。
-      async (error) => this.#markFailed(`${error.name}: ${error.message}`),
+      async (bucket) => (state === 'running' ? this.#indexPage(bucketId, bucket) : this.#chaseMediaFacts(bucket)),
+      // バケット定義や binding が消えている場合。
+      //
+      // 'running'(索引フェーズ)はリトライしても回復しないので即座に failed へ落として止める
+      // (従来どおり)。
+      //
+      // 'complete'(media チェイスフェーズ)は非対称に扱う。**索引フェーズの complete を
+      // 上書きしてはいけない。**索引本体は健全なのに丸ごと failed に落とすと、
+      // (1) mediaPending の可視性が消え、(2) 回復手段がフル再スキャンだけになり、
+      // (3)「indexed:true への切り替えは status を見て決める」という運用判断を誤らせる
+      // (レビュー指摘)。状態にもカーソルにも触れず console.error だけを出して return する
+      // ── mediaPending が 0 より大きいまま凍結されることそのものが「詰まっている」の
+      // 可視化であり、再 alarm もしない(binding 消失のような原因は運用者が直すまで
+      // 自然には治らない。回復手段は改めての startBackfill)。
+      async (error) => {
+        if (state === 'running') {
+          this.#markFailed(`${error.name}: ${error.message}`);
+
+          return;
+        }
+        console.error(`media chase stalled (index remains complete): ${error.name}: ${error.message}`);
+      },
     );
   }
 
@@ -437,9 +494,52 @@ export class ObjectIndex extends SqliteStore {
       // トゥームストーン」を書かないのと対称にする。
       this.db.delete(backfillTombstones).run();
       this.#metaSet(BACKFILL_STATE_KEY, 'complete');
+      // 索引フェーズが終わった時点で、寸法未抽出の画像が残っていれば media 追い掛け
+      // フェーズを続けて予約する(alarm() が 'complete' + mediaPending > 0 を見て
+      // #chaseMediaFacts に振り向ける)。
+      if (this.#mediaPendingCount() > 0) await this.ctx.storage.setAlarm(Date.now());
     } catch (cause) {
       this.#markFailed(cause instanceof Error ? `${cause.name}: ${cause.message}` : `${cause}`);
     }
+  }
+
+  // 索引フェーズ complete 後の追い掛け。width IS NULL の画像行を 1 alarm あたり
+  // MEDIA_CHASE_BATCH 件だけ抽出する。カーソルは持たない — width IS NULL が残作業
+  // そのものであり、抽出済み行は自然に候補から消える。行が途中で削除されても
+  // setMediaFacts は 0 行更新で終わる(Task 2)。抽出失敗(err)の行も含め、ここで
+  // width=0/height=0 を書いて「試行済み・寸法なし」を刻み、無限ループを防ぐ
+  // (mediaOf は 0 以下を none に写すので、ワイヤ上は none のまま — Task 1 の仕様)。
+  async #chaseMediaFacts(bucket: R2Bucket): Promise<void> {
+    const rows = this.db.select({ key: objects.key }).from(objects).where(this.#mediaPendingWhere()).orderBy(asc(objects.key)).limit(MEDIA_CHASE_BATCH).all();
+
+    for (const row of rows) {
+      await probeImageDimensions(bucket, row.key).match(
+        (dimensions) => this.setMediaFacts(row.key, dimensions?.width ?? 0, dimensions?.height ?? 0),
+        (error) => {
+          console.error(`media chase failed: ${row.key}`, error);
+          this.setMediaFacts(row.key, 0, 0);
+        },
+      );
+    }
+
+    if (this.#mediaPendingCount() > 0) await this.ctx.storage.setAlarm(Date.now());
+  }
+
+  // media 追い掛けフェーズの残件数。width IS NULL(未抽出)かつ image/* の行数。
+  // #chaseMediaFacts が 1 件処理するごとに width が 0 以上の値で埋まるので、この数が
+  // フェーズの進捗そのものになる(副作用は無い。status() と #indexPage / alarm() の
+  // 両方から呼ばれるクエリ)。
+  #mediaPendingCount(): number {
+    const row = this.db.select({ total: countRows() }).from(objects).where(this.#mediaPendingWhere()).get();
+
+    return row?.total ?? 0;
+  }
+
+  // #mediaPendingCount / #chaseMediaFacts が共有する「media 追い掛けの残作業」の定義。
+  // 二箇所に同じ WHERE を書き分けると、片方だけ条件を変えたときに静かにズレる
+  // (レビュー指摘の Minor)。
+  #mediaPendingWhere() {
+    return and(isNull(objects.width), like(objects.contentType, 'image/%'));
   }
 
   // R2 の list を叩く箇所を 1 つに切り出したもの。ここが await の間だけ DO の入力ゲートが
@@ -478,6 +578,8 @@ export class ObjectIndex extends SqliteStore {
       size: object.size,
       uploadedAt: object.uploaded.toISOString(),
       etag: object.httpEtag,
+      // バックフィルは R2 の list からしか寸法を知り得ない。索引列からの導出は Task 2。
+      media: NO_MEDIA,
     });
   }
 

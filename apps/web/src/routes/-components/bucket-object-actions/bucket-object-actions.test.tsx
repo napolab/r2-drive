@@ -1,5 +1,6 @@
 import Uppy from '@uppy/core';
 import { createApiClient } from '@r2-drive/api/client';
+import { NO_MEDIA } from '@r2-drive/core';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
@@ -35,6 +36,7 @@ const objects: readonly ObjectDescriptor[] = ['a.txt', 'b.txt', 'c.txt'].map((ke
   size: 10,
   uploadedAt: '2026-08-14T00:00:00.000Z',
   etag: key,
+  media: NO_MEDIA,
 }));
 const folders: readonly FolderDescriptor[] = [{ bucketId: 'photos', prefix: 'docs/archive/', name: 'archive' }];
 
@@ -72,6 +74,8 @@ const renderActions = (queryClient: QueryClient, rows: Rows) => {
           folders={nextRows.folders}
           objects={nextRows.objects}
           getContentUrl={() => '/content'}
+          viewMode="tiles"
+          onViewModeChange={vi.fn()}
           onOpenFolder={vi.fn()}
           onPrefetchFolder={vi.fn()}
           onOpenObject={vi.fn()}

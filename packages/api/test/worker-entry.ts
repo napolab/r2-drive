@@ -98,6 +98,15 @@ export class ObjectIndexUnderTest extends ObjectIndex {
     return this.db.select({ v: meta.v }).from(meta).where(eq(meta.k, k)).get()?.v ?? undefined;
   }
 
+  // meta を直接上書きするための窓。実際に startBackfill / alarm を走らせなくても
+  // 「索引フェーズは complete 済み・backfill_bucket_id だけ不正」のような状態機械の
+  // 一点を、debugMeta の書き込み版として決定的に組み立てるために使う。#metaSet と
+  // 同じ書き方(onConflictDoUpdate)だが、production の RPC 表面には出さない
+  // (Ruling 10)。
+  debugSetMeta(k: string, v: string): void {
+    this.db.insert(meta).values({ k, v }).onConflictDoUpdate({ target: meta.k, set: { v } }).run();
+  }
+
   // 予約済み alarm の時刻。未予約なら null。「回復不能な失敗は状態に記録して止める」の
   // 「止める」側 — つまり次の alarm を予約していないこと — を実際に張るための窓。
   // これが無いと「failed になる」しか検証できず、テスト名が主張する「再予約しない」が

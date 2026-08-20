@@ -1,3 +1,4 @@
+import { NO_MEDIA } from '@r2-drive/core';
 import { env } from 'cloudflare:test';
 import { expect, it } from 'vitest';
 
@@ -65,6 +66,7 @@ const descriptorOf = (bucketId: string, key: string): ObjectDescriptor => ({
   size: 1,
   uploadedAt: '2026-08-18T00:00:00.000Z',
   etag: `"etag-${key}"`,
+  media: NO_MEDIA,
 });
 
 it('indexed: false のバケットでも、検索の cursor を一覧に渡すと 412 を返す', async () => {

@@ -12,6 +12,7 @@
     "@r2-drive/core": "workspace:*",
     "drizzle-orm": "^0.45.2",
     "hono": "catalog:",
+    "image-size": "^2.0.2",
     "mime": "^4.1.0",
     "neverthrow": "catalog:",
     "range-parser": "^1.2.1",

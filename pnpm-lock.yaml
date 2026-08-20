@@ -104,6 +104,9 @@ importers:
       react-markdown:
         specifier: ^10.1.0
         version: 10.1.0(@types/react@19.2.18)(react@19.2.8)
+      react-stately:
+        specifier: 3.49.0
+        version: 3.49.0(react@19.2.8)
       remark-gfm:
         specifier: ^4.0.1
         version: 4.0.1
@@ -123,6 +126,9 @@ importers:
       '@pandacss/preset-base':
         specifier: ^1.12.0
         version: 1.12.0
+      '@react-types/shared':
+        specifier: 3.36.1
+        version: 3.36.1(react@19.2.8)
       '@testing-library/react':
         specifier: ^16.3.2
         version: 16.3.2(@testing-library/dom@10.4.1)(@types/react-dom@19.2.4(@types/react@19.2.18))(@types/react@19.2.18)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
@@ -174,6 +180,9 @@ importers:
       hono:
         specifier: 'catalog:'
         version: 4.13.2
+      image-size:
+        specifier: ^2.0.2
+        version: 2.0.2
       mime:
         specifier: ^4.1.0
         version: 4.1.0
@@ -2295,6 +2304,11 @@ packages:
   husky@9.1.7:
     resolution: {integrity: sha512-5gs5ytaNjBrh5Ow3zrvdUUY+0VxIuWVL4i9irt6friV+BqdCfmV11CQTWMiBYWHbXhco+J1kHfTOUkePhCDvMA==}
     engines: {node: '>=18'}
+    hasBin: true
+
+  image-size@2.0.2:
+    resolution: {integrity: sha512-IRqXKlaXwgSMAMtpNzZa1ZAe8m+Sa1770Dhk8VkSsP9LS+iHD62Zd8FQKs8fbPiagBE7BzoFX23cxFnwshpV6w==}
+    engines: {node: '>=16.x'}
     hasBin: true
 
   inline-style-parser@0.2.7:
@@ -5397,6 +5411,8 @@ snapshots:
   html-void-elements@3.0.0: {}
 
   husky@9.1.7: {}
+
+  image-size@2.0.2: {}
 
   inline-style-parser@0.2.7: {}
 
