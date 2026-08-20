@@ -139,9 +139,6 @@ export const tokens = defineTokens({
     fileTileGap: { value: '12px' },
     fileNameArea: { value: '48px' },
     filePreviewIcon: { value: '72px' },
-    // gallery のチップ列(フォルダ / 非画像ファイル)に添えるインライン glyph。
-    // filePreviewIcon(square tile 用、72px)とは用途が違うので別トークンにする。
-    chipIcon: { value: '16px' },
   },
 
   opacity: {

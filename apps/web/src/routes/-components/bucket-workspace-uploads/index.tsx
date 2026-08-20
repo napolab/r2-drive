@@ -127,12 +127,10 @@ export const BucketWorkspaceUploads = ({
       {viewMode === 'gallery' ? (
         <div className={styles.gallerySelectionScope} onKeyDownCapture={handleGalleryKeyDown}>
           <GalleryView
-            folders={folders}
             objects={objects}
             getContentUrl={getContentUrl}
             selectedKeys={selectedKeys}
             onSelectionChange={onSelectionChange}
-            onOpenFolder={onOpenFolder}
             onOpenObject={onOpenObject}
             onExternalFiles={handleExternalFiles}
             onExternalFileError={handleExternalFileError}

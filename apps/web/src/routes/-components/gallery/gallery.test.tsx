@@ -2,9 +2,9 @@ import { cleanup, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { GalleryView, isGalleryImage } from './index';
+import { GalleryView, isGalleryMedia } from './index';
 
-import type { FolderDescriptor, ObjectDescriptor } from '@r2-drive/core';
+import type { ObjectDescriptor } from '@r2-drive/core';
 
 const make = (key: string, contentType: string, media: ObjectDescriptor['media'] = { kind: 'none' }): ObjectDescriptor => ({
   bucketId: 'b',
@@ -16,7 +16,6 @@ const make = (key: string, contentType: string, media: ObjectDescriptor['media']
   etag: '"x"',
   media,
 });
-const folder = (prefix: string): FolderDescriptor => ({ bucketId: 'b', prefix, name: prefix.slice(0, -1) });
 
 // SkylineLayout は viewport 幅から列数を決める。jsdom の clientWidth/clientHeight は
 // 常に 0 なので、実ブラウザ相当の scroll viewport をこの component test だけに与える
@@ -35,18 +34,15 @@ afterEach(() => {
 });
 
 const renderGallery = (overrides: Partial<Parameters<typeof GalleryView>[0]> = {}) => {
-  const onOpenFolder = vi.fn();
   const onOpenObject = vi.fn();
   const onExternalFiles = vi.fn();
   const onExternalFileError = vi.fn();
   const { container } = render(
     <GalleryView
-      folders={[folder('trips/')]}
-      objects={[make('a.png', 'image/png', { kind: 'image', width: 800, height: 600 }), make('b.png', 'image/png'), make('notes.md', 'text/markdown')]}
+      objects={[make('a.png', 'image/png', { kind: 'image', width: 800, height: 600 })]}
       getContentUrl={(o) => `/content/${o.key}`}
       selectedKeys={new Set()}
       onSelectionChange={() => undefined}
-      onOpenFolder={onOpenFolder}
       onOpenObject={onOpenObject}
       onExternalFiles={onExternalFiles}
       onExternalFileError={onExternalFileError}
@@ -55,48 +51,16 @@ const renderGallery = (overrides: Partial<Parameters<typeof GalleryView>[0]> = {
       {...overrides}
     />,
   );
-  return { container, onOpenFolder, onOpenObject, onExternalFiles, onExternalFileError };
+  return { container, onOpenObject, onExternalFiles, onExternalFileError };
 };
 
 describe('GalleryView', () => {
-  it('フォルダと非画像はチップ列、画像はチップに出ない', () => {
-    renderGallery();
-    expect(screen.getByRole('button', { name: /trips/ })).toBeTruthy();
-    expect(screen.getByRole('button', { name: /notes\.md/ })).toBeTruthy();
-    expect(screen.queryByRole('button', { name: /a\.png/ })).toBeNull();
-  });
-
-  it('フォルダチップで onOpenFolder が呼ばれる', async () => {
-    const { onOpenFolder } = renderGallery();
-    await userEvent.click(screen.getByRole('button', { name: /trips/ }));
-    expect(onOpenFolder).toHaveBeenCalledWith('trips/');
-  });
-
-  it('view 可能な非画像チップで onOpenObject が呼ばれる', async () => {
-    const { onOpenObject } = renderGallery();
-    await userEvent.click(screen.getByRole('button', { name: /notes\.md/ }));
-    expect(onOpenObject).toHaveBeenCalledWith('notes.md');
-  });
-
-  it('opaque な非画像チップは無効化され onOpenObject を呼ばない', async () => {
-    const { onOpenObject } = renderGallery({ objects: [make('archive.bin', 'application/octet-stream')] });
-    const chip = screen.getByRole('button', { name: /archive\.bin/ }) as HTMLButtonElement;
-    expect(chip.disabled).toBe(true);
-    await userEvent.click(chip);
-    expect(onOpenObject).not.toHaveBeenCalled();
-  });
-
-  it('チップが 20 件を超えると畳まれ、「他 N 件」で展開できる', async () => {
-    const manyFolders = Array.from({ length: 25 }, (_, i) => folder(`dir-${i}/`));
-    renderGallery({ folders: manyFolders, objects: [] });
-
-    expect(screen.getAllByRole('button', { name: /^dir-/ })).toHaveLength(20);
-    const more = screen.getByRole('button', { name: /他 5 件/ });
-    expect(more).toBeTruthy();
-
-    await userEvent.click(more);
-    expect(screen.getAllByRole('button', { name: /^dir-/ })).toHaveLength(25);
-    expect(screen.queryByRole('button', { name: /他 \d+ 件/ })).toBeNull();
+  it('画像・動画以外(フォルダ相当の非メディアファイル)はギャラリーに表示されない', () => {
+    // GalleryView はそもそも folders / onOpenFolder を受け取らない(タイルビューの役割)。
+    // 非メディアの objects も skyline から除外されることを cell 数で確認する。
+    const { container } = renderGallery({ objects: [make('notes.md', 'text/markdown'), make('a.png', 'image/png', { kind: 'image', width: 800, height: 600 })] });
+    expect(container.querySelectorAll('[role="row"]')).toHaveLength(1);
+    expect(container.querySelector('img')).toBeTruthy();
   });
 
   it('画像セルをクリックすると onOpenObject が呼ばれる', async () => {
@@ -113,13 +77,31 @@ describe('GalleryView', () => {
     expect(img?.getAttribute('src')).toBe('/content/b.png');
   });
 
+  it('動画セルは <video> を preload=metadata / muted / playsInline / controls なしで描画する', () => {
+    const { container } = renderGallery({ objects: [make('v.mp4', 'video/mp4')] });
+    const video = container.querySelector('video') as HTMLVideoElement | null;
+    if (video === null) throw new Error('video cell did not render a <video>');
+    expect(video.getAttribute('src')).toBe('/content/v.mp4');
+    expect(video.getAttribute('preload')).toBe('metadata');
+    expect(video.muted).toBe(true);
+    expect(video.hasAttribute('controls')).toBe(false);
+  });
+
+  it('動画セルをクリックすると onOpenObject が呼ばれる(再生はビューアの仕事)', async () => {
+    const { container, onOpenObject } = renderGallery({ objects: [make('v.mp4', 'video/mp4')] });
+    const video = container.querySelector('video');
+    if (video === null) throw new Error('video cell did not render a <video>');
+    await userEvent.click(video);
+    expect(onOpenObject).toHaveBeenCalledWith('v.mp4');
+  });
+
   // object-list の FileRow は getObjectRowId(`f:${key}`)を GridListItem の id に使う。
   // Task 9 で選択状態(bucket-object-actions)を object-list と gallery で共有する前提なので、
-  // gallery の画像セルも同じキー空間で選択される必要がある(でないと bulk actions や
+  // gallery のメディアセルも同じキー空間で選択される必要がある(でないと bulk actions や
   // folder ガードから gallery 経由の選択がすり抜ける)。
-  it('画像セルの選択は object-list と同じ getObjectRowId(`f:${key}`)形式のキーで通知される', async () => {
+  it('メディアセルの選択は object-list と同じ getObjectRowId(`f:${key}`)形式のキーで通知される', async () => {
     const onSelectionChange = vi.fn();
-    renderGallery({ folders: [], objects: [make('a.png', 'image/png', { kind: 'image', width: 800, height: 600 })], onSelectionChange });
+    renderGallery({ objects: [make('a.png', 'image/png', { kind: 'image', width: 800, height: 600 })], onSelectionChange });
 
     await userEvent.tab();
     await userEvent.keyboard(' ');
@@ -130,10 +112,11 @@ describe('GalleryView', () => {
   });
 });
 
-describe('isGalleryImage', () => {
-  it('contentType image/* のみ true', () => {
-    expect(isGalleryImage(make('a.png', 'image/png'))).toBe(true);
-    expect(isGalleryImage(make('a.md', 'text/markdown'))).toBe(false);
-    expect(isGalleryImage(make('v.mp4', 'video/mp4'))).toBe(false);
+describe('isGalleryMedia', () => {
+  it('contentType image/* または video/* のみ true', () => {
+    expect(isGalleryMedia(make('a.png', 'image/png'))).toBe(true);
+    expect(isGalleryMedia(make('v.mp4', 'video/mp4'))).toBe(true);
+    expect(isGalleryMedia(make('a.md', 'text/markdown'))).toBe(false);
+    expect(isGalleryMedia(make('a.bin', 'application/octet-stream'))).toBe(false);
   });
 });

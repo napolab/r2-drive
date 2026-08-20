@@ -7,7 +7,7 @@ import { getApiClient } from '../api/client';
 import { objectsQuery, toPrefix } from '../queries/objects';
 import { BucketObjectActions } from './-components/bucket-object-actions/index';
 import { BucketUploadSession } from './-components/bucket-upload-session/index';
-import { isGalleryImage } from './-components/gallery/index';
+import { isGalleryMedia } from './-components/gallery/index';
 import { resolveViewMode } from './-components/gallery/resolve-view-mode';
 import { ObjectViewerOverlay } from './-components/object-viewer/index';
 import * as styles from './b.$bucketId.$.styles.css';
@@ -78,9 +78,9 @@ const BucketWorkspace = ({ client, bucketId, prefix }: BucketWorkspaceProps) => 
 
   const { view, mode } = Route.useSearch();
   const viewerRequest: ViewerRequest = useMemo(() => (view === undefined ? { kind: 'closed' } : { kind: 'open', objectKey: view }), [view]);
-  // 画像が 1 件も無いフォルダはギャラリーにしても空の帯にしかならないので、
+  // 画像・動画が 1 件も無いフォルダはギャラリーにしても空の帯にしかならないので、
   // 無指定でも自動的にタイルへ落ちる(resolveViewMode)。
-  const viewMode = useMemo(() => resolveViewMode(mode, objects.some(isGalleryImage)), [mode, objects]);
+  const viewMode = useMemo(() => resolveViewMode(mode, objects.some(isGalleryMedia)), [mode, objects]);
 
   // 関数形の search updater で前の値(mode / view)を保ったまま片方だけ書き換える。
   // オブジェクトリテラルで置き換えると、view を開いた瞬間に mode が消えて

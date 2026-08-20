@@ -1,25 +1,21 @@
-import { token } from '@styled/tokens';
 import { useCallback, useMemo, useState } from 'react';
-import { Button, Collection, GridList, GridListItem, GridListLoadMoreItem, Virtualizer, useDragAndDrop } from 'react-aria-components';
+import { Collection, GridList, GridListItem, GridListLoadMoreItem, Virtualizer, useDragAndDrop } from 'react-aria-components';
 
-import { FileIcon, FilePreviewIcon } from '../../../components/file-icon/index';
-import { resolveFileType } from '../../../plugins/file-type/registry';
+import { FilePreviewIcon } from '../../../components/file-icon/index';
 import { toExternalFiles } from '../../../upload/to-external-files/index';
 import { getObjectRowId } from '../object-list/row-id';
 import { SkylineLayout } from './skyline-layout/index';
 import * as styles from './styles.css';
 
-import type { FolderDescriptor, ObjectDescriptor } from '@r2-drive/core';
+import type { ObjectDescriptor } from '@r2-drive/core';
 import type { DroppableCollectionRootDropEvent, Selection } from 'react-aria-components';
 import type { Key } from '@react-types/shared';
 
 type Props = {
-  readonly folders: readonly FolderDescriptor[];
   readonly objects: readonly ObjectDescriptor[];
   readonly getContentUrl: (object: ObjectDescriptor) => string;
   readonly selectedKeys: Selection;
   readonly onSelectionChange: (keys: Selection) => void;
-  readonly onOpenFolder: (prefix: string) => void;
   readonly onOpenObject: (key: string) => void;
   readonly onExternalFiles: (files: readonly File[]) => void;
   readonly onExternalFileError: (error: Error) => void;
@@ -27,9 +23,9 @@ type Props = {
   readonly isLoadingMore: boolean;
 };
 
-export const isGalleryImage = (object: ObjectDescriptor): boolean => object.contentType.startsWith('image/');
-
-const CHIP_ICON_SIZE = parseInt(token('sizes.chipIcon'), 10);
+// ユーザー要望(2026-08-21)によりギャラリーは画像 + 動画のみ。フォルダ・他ファイルは
+// タイルビューの役割(チップ列は廃止した)。
+export const isGalleryMedia = (object: ObjectDescriptor): boolean => object.contentType.startsWith('image/') || object.contentType.startsWith('video/');
 
 // object-list と同じ理由(spec §6.2: 選択・cmd+A・Delete・D&D 取り込みは GridList /
 // Virtualizer の既存機能のまま)。gallery でも一覧へのファイルドロップでアップロード
@@ -38,38 +34,27 @@ class ExternalFileReadError extends Error {
   override name = 'ExternalFileReadError';
 }
 
-export const GalleryView = ({
-  folders,
-  objects,
-  getContentUrl,
-  selectedKeys,
-  onSelectionChange,
-  onOpenFolder,
-  onOpenObject,
-  onExternalFiles,
-  onExternalFileError,
-  onLoadMore,
-  isLoadingMore,
-}: Props) => {
-  const images = useMemo(() => objects.filter(isGalleryImage), [objects]);
-  const others = useMemo(() => objects.filter((object) => !isGalleryImage(object)), [objects]);
+export const GalleryView = ({ objects, getContentUrl, selectedKeys, onSelectionChange, onOpenObject, onExternalFiles, onExternalFileError, onLoadMore, isLoadingMore }: Props) => {
+  const mediaObjects = useMemo(() => objects.filter(isGalleryMedia), [objects]);
 
   // ratioOf は key ごとに毎回 O(n) で objects を舐めない — 実装では Map 化する
   // (Task 8 brief の指示どおり)。GridListItem の id は選択モデルの共有キー
-  // (getObjectRowId = `f:${key}`)を使う(下記 GalleryImageCell 参照)ので、
+  // (getObjectRowId = `f:${key}`)を使う(下記 GalleryMediaCell 参照)ので、
   // SkylineLayout が渡してくる key もその形になる — Map もそれで引く。
-  const imagesByKey = useMemo(() => new Map(images.map((object) => [getObjectRowId(object), object])), [images]);
+  // 動画は索引に寸法を持たない(mediaFactsHook は image/* だけを probe する)ので、
+  // media.kind !== 'image' の分岐で自然に ratio=1(正方形)になる。
+  const mediaByKey = useMemo(() => new Map(mediaObjects.map((object) => [getObjectRowId(object), object])), [mediaObjects]);
   const ratioOf = useCallback(
     (key: Key) => {
-      const object = imagesByKey.get(`${key}`);
+      const object = mediaByKey.get(`${key}`);
       return object !== undefined && object.media.kind === 'image' ? object.media.height / object.media.width : 1;
     },
-    [imagesByKey],
+    [mediaByKey],
   );
   const layoutOptions = useMemo(() => ({ ratioOf }), [ratioOf]);
 
-  const renderImage = useCallback(
-    (object: ObjectDescriptor) => <GalleryImageCell key={object.key} object={object} getContentUrl={getContentUrl} onOpenObject={onOpenObject} />,
+  const renderMedia = useCallback(
+    (object: ObjectDescriptor) => <GalleryMediaCell key={object.key} object={object} getContentUrl={getContentUrl} onOpenObject={onOpenObject} />,
     [getContentUrl, onOpenObject],
   );
 
@@ -91,10 +76,9 @@ export const GalleryView = ({
 
   return (
     <div className={styles.root}>
-      <ChipList folders={folders} objects={others} onOpenFolder={onOpenFolder} onOpenObject={onOpenObject} />
       <Virtualizer layout={SkylineLayout} layoutOptions={layoutOptions}>
         <GridList
-          aria-label="画像一覧"
+          aria-label="メディア一覧"
           className={styles.gridRoot}
           layout="grid"
           selectionMode="multiple"
@@ -102,7 +86,7 @@ export const GalleryView = ({
           onSelectionChange={onSelectionChange}
           dragAndDropHooks={dragAndDropHooks}
         >
-          <Collection items={images}>{renderImage}</Collection>
+          <Collection items={mediaObjects}>{renderMedia}</Collection>
           {/* 末尾のセンチネル。object-list と同じく、次ページの取得もコレクションの一部。 */}
           <GridListLoadMoreItem className={styles.loadMore} onLoadMore={onLoadMore} isLoading={isLoadingMore} />
         </GridList>
@@ -112,105 +96,40 @@ export const GalleryView = ({
 };
 
 // ---------------------------------------------------------------------------
-// チップ列 — フォルダと非画像ファイルを平坦な行として並べる。20 件を超えたら畳む。
+// メディアセル — skyline GridList の中身。画像 / 動画で描画する要素だけが違う。
 // ---------------------------------------------------------------------------
 
-const COLLAPSED_CHIP_COUNT = 20;
-
-type ChipListState = { readonly kind: 'collapsed' } | { readonly kind: 'expanded' };
-
-type ChipEntry = { readonly kind: 'folder'; readonly folder: FolderDescriptor } | { readonly kind: 'object'; readonly object: ObjectDescriptor };
-
-type ChipListProps = {
-  readonly folders: readonly FolderDescriptor[];
-  readonly objects: readonly ObjectDescriptor[];
-  readonly onOpenFolder: (prefix: string) => void;
-  readonly onOpenObject: (key: string) => void;
-};
-
-const chipKey = (entry: ChipEntry): string => (entry.kind === 'folder' ? `folder:${entry.folder.prefix}` : `object:${entry.object.key}`);
-
-const renderChipEntry = (entry: ChipEntry, onOpenFolder: (prefix: string) => void, onOpenObject: (key: string) => void) => {
-  switch (entry.kind) {
-    case 'folder':
-      return <FolderChip key={chipKey(entry)} folder={entry.folder} onOpenFolder={onOpenFolder} />;
-    case 'object':
-      return <ObjectChip key={chipKey(entry)} object={entry.object} onOpenObject={onOpenObject} />;
-    default: {
-      const _exhaustive: never = entry;
-      throw new Error(`unhandled chip entry: ${JSON.stringify(_exhaustive)}`);
-    }
-  }
-};
-
-const ChipList = ({ folders, objects, onOpenFolder, onOpenObject }: ChipListProps) => {
-  const [state, setState] = useState<ChipListState>({ kind: 'collapsed' });
-  const handleExpand = useCallback(() => setState({ kind: 'expanded' }), []);
-
-  const entries = useMemo<readonly ChipEntry[]>(
-    () => [...folders.map((folder): ChipEntry => ({ kind: 'folder', folder })), ...objects.map((object): ChipEntry => ({ kind: 'object', object }))],
-    [folders, objects],
-  );
-
-  if (entries.length === 0) return null;
-
-  const isCollapsible = entries.length > COLLAPSED_CHIP_COUNT;
-  const visibleEntries = state.kind === 'expanded' || !isCollapsible ? entries : entries.slice(0, COLLAPSED_CHIP_COUNT);
-  const hiddenCount = entries.length - COLLAPSED_CHIP_COUNT;
-
-  return (
-    <div className={styles.chipListRoot} role="group" aria-label="フォルダとファイル">
-      {visibleEntries.map((entry) => renderChipEntry(entry, onOpenFolder, onOpenObject))}
-      {isCollapsible && state.kind === 'collapsed' ? (
-        <Button className={styles.chipMore} onPress={handleExpand}>
-          他 {hiddenCount} 件
-        </Button>
-      ) : null}
-    </div>
-  );
-};
-
-type FolderChipProps = { readonly folder: FolderDescriptor; readonly onOpenFolder: (prefix: string) => void };
-
-const FolderChip = ({ folder, onOpenFolder }: FolderChipProps) => {
-  const handlePress = useCallback(() => onOpenFolder(folder.prefix), [folder.prefix, onOpenFolder]);
-
-  return (
-    <Button className={styles.chip} data-kind="folder" onPress={handlePress}>
-      <FileIcon size={CHIP_ICON_SIZE} glyph="folder" />
-      <span className={styles.chipLabel}>{folder.name}</span>
-    </Button>
-  );
-};
-
-type ObjectChipProps = { readonly object: ObjectDescriptor; readonly onOpenObject: (key: string) => void };
-
-// opaque(view capability を持たない)ファイルは onPress を持たせない — FileRow
-// (object-list/index.tsx)と同じ conditional spread(exactOptionalPropertyTypes 対応)。
-const ObjectChip = ({ object, onOpenObject }: ObjectChipProps) => {
-  const match = resolveFileType(object).unwrapOr(undefined);
-  const canOpen = match !== undefined && match.capability.kind === 'view';
-  const handlePress = useCallback(() => onOpenObject(object.key), [object.key, onOpenObject]);
-
-  return (
-    <Button className={styles.chip} data-kind="object" isDisabled={!canOpen} {...(canOpen ? { onPress: handlePress } : {})}>
-      {match !== undefined ? <match.Icon size={CHIP_ICON_SIZE} /> : <FileIcon size={CHIP_ICON_SIZE} glyph="blank" />}
-      <span className={styles.chipLabel}>{object.name}</span>
-    </Button>
-  );
-};
-
-// ---------------------------------------------------------------------------
-// 画像セル — skyline GridList の中身。
-// ---------------------------------------------------------------------------
-
-type GalleryImageCellProps = {
+type GalleryMediaCellProps = {
   readonly object: ObjectDescriptor;
   readonly getContentUrl: (object: ObjectDescriptor) => string;
   readonly onOpenObject: (key: string) => void;
 };
 
-const GalleryImageCell = ({ object, getContentUrl, onOpenObject }: GalleryImageCellProps) => {
+// 読み込み失敗はアイコン + ファイル名にフォールバックする(Phase 2 の Preview と同じ思想)。
+// 動画は先頭フレームをサムネイルとして使う(preload="metadata")— controls は付けない。
+// このセルはタイルであってプレイヤーではなく、再生は onAction で開く `?view=` ビューアの仕事。
+const renderMediaCellContent = (object: ObjectDescriptor, getContentUrl: (object: ObjectDescriptor) => string, hasLoadError: boolean, onError: () => void) => {
+  const isVideo = object.contentType.startsWith('video/');
+
+  if (hasLoadError) {
+    return (
+      <span className={styles.cellFallback} data-preview-kind="icon">
+        <FilePreviewIcon glyph={isVideo ? 'video' : 'image'} />
+        <span className={styles.cellFallbackName}>{object.name}</span>
+      </span>
+    );
+  }
+
+  return isVideo ? (
+    <video className={styles.cellImage} src={getContentUrl(object)} preload="metadata" muted playsInline draggable={false} onError={onError} />
+  ) : (
+    // media none(寸法不明)でも正方形セルとして描画する — ratioOf の既定 1 が
+    // その形を決め、object-fit: cover がトリミングを担う(design-direction §7)。
+    <img className={styles.cellImage} src={getContentUrl(object)} alt="" loading="lazy" decoding="async" draggable={false} onError={onError} />
+  );
+};
+
+const GalleryMediaCell = ({ object, getContentUrl, onOpenObject }: GalleryMediaCellProps) => {
   const [hasLoadError, setHasLoadError] = useState(false);
   const handleError = useCallback(() => setHasLoadError(true), []);
   const handleAction = useCallback(() => onOpenObject(object.key), [object.key, onOpenObject]);
@@ -221,16 +140,7 @@ const GalleryImageCell = ({ object, getContentUrl, onOpenObject }: GalleryImageC
     // folder ガードから gallery の選択が漏れない。onAction 側は viewer 契約(生 key)
     // のまま — object.key を渡す(id とは別物)。
     <GridListItem id={getObjectRowId(object)} textValue={object.name} className={styles.cell} onAction={handleAction}>
-      {hasLoadError ? (
-        <span className={styles.cellFallback} data-preview-kind="icon">
-          <FilePreviewIcon glyph="image" />
-          <span className={styles.cellFallbackName}>{object.name}</span>
-        </span>
-      ) : (
-        // media none(寸法不明)でも正方形セルとして描画する — ratioOf の既定 1 が
-        // その形を決め、object-fit: cover がトリミングを担う(design-direction §7)。
-        <img className={styles.cellImage} src={getContentUrl(object)} alt="" loading="lazy" decoding="async" draggable={false} onError={handleError} />
-      )}
+      {renderMediaCellContent(object, getContentUrl, hasLoadError, handleError)}
     </GridListItem>
   );
 };
