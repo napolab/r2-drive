@@ -179,7 +179,11 @@ const ResolvedViewer = ({ object, getContentUrl }: ResolvedViewerProps) => {
       switch (capability.kind) {
         case 'view':
           return (
-            <ViewerErrorBoundary fallback={<ViewerLoadFailure object={object} getContentUrl={getContentUrl} />}>
+            // object の identity(bucketId + key + etag)を key にして、prev/next で別ファイルへ
+            // 移動したときにエラーバウンダリと配下(画像/動画/音声の hasLoadError など)を丸ごと
+            // 再マウントする。key が無いと同じツリー位置で reconcile され、一度失敗した
+            // hasError / hasLoadError が次のファイルにまで持ち越されてしまう。
+            <ViewerErrorBoundary key={`${object.bucketId}:${object.key}:${object.etag}`} fallback={<ViewerLoadFailure object={object} getContentUrl={getContentUrl} />}>
               <Suspense fallback={<p className={styles.stateNotice}>読み込み中</p>}>
                 <capability.Viewer object={object} getContentUrl={getContentUrl} />
               </Suspense>

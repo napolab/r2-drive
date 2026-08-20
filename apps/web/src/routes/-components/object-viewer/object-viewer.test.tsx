@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { render, screen } from '@testing-library/react';
+import { render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 
@@ -76,5 +76,56 @@ describe('ObjectViewerOverlay', () => {
     renderOverlay({ request: { kind: 'open', objectKey: 'b.bin' } });
     await screen.findByRole('dialog');
     expect(await screen.findByText(/表示できません/)).toBeTruthy();
+  });
+
+  it('あるファイルでビューアが失敗しても、次のファイルへ移動すればエラー表示が残らない(object 単位でエラーバウンダリがリセットされる)', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(() => Promise.reject(new Error('network error'))),
+    );
+
+    const failingObjects = [make('readme.txt', 'text/plain'), make('a.png', 'image/png')];
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+
+    const { rerender } = render(
+      <QueryClientProvider client={queryClient}>
+        <ObjectViewerOverlay
+          client={client}
+          bucketId="b"
+          objects={failingObjects}
+          request={{ kind: 'open', objectKey: 'readme.txt' }}
+          getContentUrl={getContentUrl}
+          onClose={vi.fn()}
+          onNavigate={vi.fn()}
+        />
+      </QueryClientProvider>,
+    );
+
+    const failureNotice = await screen.findByText(/ビューアを読み込めませんでした/);
+    const failingDialog = failureNotice.closest('[role="dialog"]');
+    if (!(failingDialog instanceof HTMLElement)) throw new Error('dialog element not found');
+
+    rerender(
+      <QueryClientProvider client={queryClient}>
+        <ObjectViewerOverlay
+          client={client}
+          bucketId="b"
+          objects={failingObjects}
+          request={{ kind: 'open', objectKey: 'a.png' }}
+          getContentUrl={getContentUrl}
+          onClose={vi.fn()}
+          onNavigate={vi.fn()}
+        />
+      </QueryClientProvider>,
+    );
+
+    // 同じ Dialog DOM ノード(ViewerDialog は remount しない)の中で見比べる。
+    // 過去の it() が残した leftover なテスト DOM は aria-hidden で隠れるため
+    // role query では拾われないが、alt テキストのようなプレーンな query は
+    // 拾ってしまうことがあるので、比較は必ず対象の dialog 配下に絞る。
+    expect(within(failingDialog).queryByText(/ビューアを読み込めませんでした/)).toBeNull();
+    expect(await within(failingDialog).findByAltText('a.png')).toBeTruthy();
+
+    vi.unstubAllGlobals();
   });
 });

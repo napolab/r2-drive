@@ -16,5 +16,9 @@ export const objectQuery = (client: ApiClient, bucketId: string, key: string) =>
           throw error;
         },
       ),
+    // 存在しない key はリトライしても見つからないので即座に not-found を出す。
+    // デフォルトの 3 回リトライ(指数バックオフ)は typo'd ?view= のディープリンクで
+    // 数秒間「読み込み中」を表示し続ける原因になっていた。
+    retry: false,
   });
 };
