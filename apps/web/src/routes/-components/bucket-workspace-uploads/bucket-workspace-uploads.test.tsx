@@ -122,6 +122,28 @@ describe('BucketWorkspaceUploads', () => {
     expect(uppy.getFiles().map((file) => file.name)).toEqual(['picker.txt', 'dropped.txt']);
   });
 
+  it('gallery mode でも GalleryView の root drop が同じ現在 session へ File を追加する(spec §6.2)', async () => {
+    const uppy = createSession();
+    renderWorkspace(uppy, { viewMode: 'gallery', objects: [image('docs/a.png')] });
+
+    if (rootDropCapture.current.kind !== 'captured') throw new Error('GalleryView did not register onRootDrop');
+    const { handler } = rootDropCapture.current;
+    const droppedFile = new File(['drop'], 'dropped.txt', { type: 'text/plain' });
+    const droppedItem: FileDropItem = {
+      kind: 'file',
+      type: 'text/plain',
+      name: 'dropped.txt',
+      getFile: async () => droppedFile,
+      getText: async () => 'drop',
+    };
+
+    await act(async () => {
+      await handler({ items: [droppedItem], dropOperation: 'copy' });
+    });
+
+    expect(uppy.getFiles().map((file) => file.name)).toEqual(['dropped.txt']);
+  });
+
   it('UploadTray のキーボード中断が現在 session から対象 file を remove する', async () => {
     const uppy = createSession();
     const user = userEvent.setup();

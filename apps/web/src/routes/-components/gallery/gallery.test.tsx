@@ -37,6 +37,8 @@ afterEach(() => {
 const renderGallery = (overrides: Partial<Parameters<typeof GalleryView>[0]> = {}) => {
   const onOpenFolder = vi.fn();
   const onOpenObject = vi.fn();
+  const onExternalFiles = vi.fn();
+  const onExternalFileError = vi.fn();
   const { container } = render(
     <GalleryView
       folders={[folder('trips/')]}
@@ -46,12 +48,14 @@ const renderGallery = (overrides: Partial<Parameters<typeof GalleryView>[0]> = {
       onSelectionChange={() => undefined}
       onOpenFolder={onOpenFolder}
       onOpenObject={onOpenObject}
+      onExternalFiles={onExternalFiles}
+      onExternalFileError={onExternalFileError}
       onLoadMore={() => undefined}
       isLoadingMore={false}
       {...overrides}
     />,
   );
-  return { container, onOpenFolder, onOpenObject };
+  return { container, onOpenFolder, onOpenObject, onExternalFiles, onExternalFileError };
 };
 
 describe('GalleryView', () => {

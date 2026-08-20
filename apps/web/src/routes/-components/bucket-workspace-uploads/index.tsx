@@ -134,6 +134,8 @@ export const BucketWorkspaceUploads = ({
             onSelectionChange={onSelectionChange}
             onOpenFolder={onOpenFolder}
             onOpenObject={onOpenObject}
+            onExternalFiles={handleExternalFiles}
+            onExternalFileError={handleExternalFileError}
             onLoadMore={onLoadMore}
             isLoadingMore={isLoadingMore}
           />

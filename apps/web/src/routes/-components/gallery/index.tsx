@@ -1,15 +1,16 @@
 import { token } from '@styled/tokens';
 import { useCallback, useMemo, useState } from 'react';
-import { Button, Collection, GridList, GridListItem, GridListLoadMoreItem, Virtualizer } from 'react-aria-components';
+import { Button, Collection, GridList, GridListItem, GridListLoadMoreItem, Virtualizer, useDragAndDrop } from 'react-aria-components';
 
 import { FileIcon, FilePreviewIcon } from '../../../components/file-icon/index';
 import { resolveFileType } from '../../../plugins/file-type/registry';
+import { toExternalFiles } from '../../../upload/to-external-files/index';
 import { getObjectRowId } from '../object-list/row-id';
 import { SkylineLayout } from './skyline-layout/index';
 import * as styles from './styles.css';
 
 import type { FolderDescriptor, ObjectDescriptor } from '@r2-drive/core';
-import type { Selection } from 'react-aria-components';
+import type { DroppableCollectionRootDropEvent, Selection } from 'react-aria-components';
 import type { Key } from '@react-types/shared';
 
 type Props = {
@@ -20,6 +21,8 @@ type Props = {
   readonly onSelectionChange: (keys: Selection) => void;
   readonly onOpenFolder: (prefix: string) => void;
   readonly onOpenObject: (key: string) => void;
+  readonly onExternalFiles: (files: readonly File[]) => void;
+  readonly onExternalFileError: (error: Error) => void;
   readonly onLoadMore: () => void;
   readonly isLoadingMore: boolean;
 };
@@ -28,7 +31,26 @@ export const isGalleryImage = (object: ObjectDescriptor): boolean => object.cont
 
 const CHIP_ICON_SIZE = parseInt(token('sizes.chipIcon'), 10);
 
-export const GalleryView = ({ folders, objects, getContentUrl, selectedKeys, onSelectionChange, onOpenFolder, onOpenObject, onLoadMore, isLoadingMore }: Props) => {
+// object-list と同じ理由(spec §6.2: 選択・cmd+A・Delete・D&D 取り込みは GridList /
+// Virtualizer の既存機能のまま)。gallery でも一覧へのファイルドロップでアップロード
+// できる必要がある。
+class ExternalFileReadError extends Error {
+  override name = 'ExternalFileReadError';
+}
+
+export const GalleryView = ({
+  folders,
+  objects,
+  getContentUrl,
+  selectedKeys,
+  onSelectionChange,
+  onOpenFolder,
+  onOpenObject,
+  onExternalFiles,
+  onExternalFileError,
+  onLoadMore,
+  isLoadingMore,
+}: Props) => {
   const images = useMemo(() => objects.filter(isGalleryImage), [objects]);
   const others = useMemo(() => objects.filter((object) => !isGalleryImage(object)), [objects]);
 
@@ -51,11 +73,35 @@ export const GalleryView = ({ folders, objects, getContentUrl, selectedKeys, onS
     [getContentUrl, onOpenObject],
   );
 
+  // object-list の handleRootDrop と同じ形。toExternalFiles で読み取り、失敗は
+  // ExternalFileReadError に包んで onExternalFileError へ渡す。
+  const handleRootDrop = useCallback(
+    async (event: DroppableCollectionRootDropEvent) => {
+      try {
+        const files = await toExternalFiles(event.items);
+        if (files.length > 0) onExternalFiles(files);
+      } catch (cause) {
+        onExternalFileError(new ExternalFileReadError('ドロップしたファイルを読み込めませんでした', { cause }));
+      }
+    },
+    [onExternalFileError, onExternalFiles],
+  );
+  const dragAndDropOptions = useMemo(() => ({ acceptedDragTypes: 'all' as const, onRootDrop: handleRootDrop }), [handleRootDrop]);
+  const { dragAndDropHooks } = useDragAndDrop(dragAndDropOptions);
+
   return (
     <div className={styles.root}>
       <ChipList folders={folders} objects={others} onOpenFolder={onOpenFolder} onOpenObject={onOpenObject} />
       <Virtualizer layout={SkylineLayout} layoutOptions={layoutOptions}>
-        <GridList aria-label="画像一覧" className={styles.gridRoot} layout="grid" selectionMode="multiple" selectedKeys={selectedKeys} onSelectionChange={onSelectionChange}>
+        <GridList
+          aria-label="画像一覧"
+          className={styles.gridRoot}
+          layout="grid"
+          selectionMode="multiple"
+          selectedKeys={selectedKeys}
+          onSelectionChange={onSelectionChange}
+          dragAndDropHooks={dragAndDropHooks}
+        >
           <Collection items={images}>{renderImage}</Collection>
           {/* 末尾のセンチネル。object-list と同じく、次ページの取得もコレクションの一部。 */}
           <GridListLoadMoreItem className={styles.loadMore} onLoadMore={onLoadMore} isLoading={isLoadingMore} />
