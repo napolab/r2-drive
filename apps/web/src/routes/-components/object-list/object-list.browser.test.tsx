@@ -80,6 +80,7 @@ it('実 CSS で preview が正方形になり、長短の名前が同じ subgrid
           onPrefetchFolder={noop}
           onExternalFiles={noop}
           onExternalFileError={noop}
+          onOpenObject={noop}
           onLoadMore={noop}
           isLoadingMore={false}
         />,

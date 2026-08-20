@@ -74,6 +74,7 @@ const renderActions = (queryClient: QueryClient, rows: Rows) => {
           getContentUrl={() => '/content'}
           onOpenFolder={vi.fn()}
           onPrefetchFolder={vi.fn()}
+          onOpenObject={vi.fn()}
           onLoadMore={vi.fn()}
           isLoadingMore={false}
         />

@@ -156,6 +156,7 @@ it('10,000 オブジェクトを teleport / continuous のどちらでスクロ�
           onObjectContextMenu={noop}
           onOpenFolder={noop}
           onPrefetchFolder={noop}
+          onOpenObject={noop}
           onExternalFiles={noop}
           onExternalFileError={noop}
           onLoadMore={noop}

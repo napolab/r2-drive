@@ -25,6 +25,7 @@ type Props = {
   readonly onObjectContextMenu: (object: ObjectDescriptor, point: { readonly x: number; readonly y: number }, trigger: HTMLElement) => void;
   readonly onOpenFolder: (prefix: string) => void;
   readonly onPrefetchFolder: (prefix: string) => void;
+  readonly onOpenObject: (key: string) => void;
   readonly onExternalFiles: (files: readonly File[]) => void;
   readonly onExternalFileError: (error: Error) => void;
   // 1 ページ 1,000 件(`plugins/object-source/r2-list` の R2_LIST_PAGE_SIZE)。
@@ -66,6 +67,7 @@ export const ObjectList = ({
   onObjectContextMenu,
   onOpenFolder,
   onPrefetchFolder,
+  onOpenObject,
   onExternalFiles,
   onExternalFileError,
   onLoadMore,
@@ -76,8 +78,8 @@ export const ObjectList = ({
   const contextTarget = useRef<HTMLElement | undefined>(undefined);
 
   const renderRow = useCallback(
-    (row: Row) => <ObjectRow row={row} getContentUrl={getContentUrl} onOpenFolder={onOpenFolder} onPrefetchFolder={onPrefetchFolder} />,
-    [getContentUrl, onOpenFolder, onPrefetchFolder],
+    (row: Row) => <ObjectRow row={row} getContentUrl={getContentUrl} onOpenFolder={onOpenFolder} onPrefetchFolder={onPrefetchFolder} onOpenObject={onOpenObject} />,
+    [getContentUrl, onOpenFolder, onPrefetchFolder, onOpenObject],
   );
 
   // GridListItem はフォーカスイベントを prop として公開していない(react-aria の
@@ -167,14 +169,15 @@ type RowProps = {
   readonly getContentUrl: (object: ObjectDescriptor) => string;
   readonly onOpenFolder: (prefix: string) => void;
   readonly onPrefetchFolder: (prefix: string) => void;
+  readonly onOpenObject: (key: string) => void;
 };
 
-const ObjectRow = ({ row, getContentUrl, onOpenFolder, onPrefetchFolder }: RowProps) => {
+const ObjectRow = ({ row, getContentUrl, onOpenFolder, onPrefetchFolder, onOpenObject }: RowProps) => {
   switch (row.kind) {
     case 'folder':
       return <FolderRow id={row.id} folder={row.folder} onOpenFolder={onOpenFolder} onPrefetchFolder={onPrefetchFolder} />;
     case 'object':
-      return <FileRow id={row.id} object={row.object} getContentUrl={getContentUrl} />;
+      return <FileRow id={row.id} object={row.object} getContentUrl={getContentUrl} onOpenObject={onOpenObject} />;
     default: {
       const _exhaustive: never = row;
       throw new Error(`unhandled row: ${JSON.stringify(_exhaustive)}`);
@@ -216,14 +219,17 @@ type FileRowProps = {
   readonly id: string;
   readonly object: ObjectDescriptor;
   readonly getContentUrl: (object: ObjectDescriptor) => string;
+  readonly onOpenObject: (key: string) => void;
 };
 
-const FileRow = ({ id, object, getContentUrl }: FileRowProps) => {
+const FileRow = ({ id, object, getContentUrl, onOpenObject }: FileRowProps) => {
   const match = resolveFileType(object).unwrapOr(undefined);
   const previewIdentity = JSON.stringify([object.bucketId, object.key, object.etag]);
+  const handleAction = useCallback(() => onOpenObject(object.key), [object.key, onOpenObject]);
+  const canView = match !== undefined && match.capability.kind === 'view';
 
   return (
-    <GridListItem id={id} textValue={object.name} className={styles.tile} data-kind="object">
+    <GridListItem id={id} textValue={object.name} className={styles.tile} data-kind="object" {...(canView ? { onAction: handleAction } : {})}>
       <div className={styles.tileGrid}>
         <span className={styles.previewRoot}>{match !== undefined ? <match.Preview key={previewIdentity} object={object} getContentUrl={getContentUrl} /> : null}</span>
         <span className={styles.nameRoot}>

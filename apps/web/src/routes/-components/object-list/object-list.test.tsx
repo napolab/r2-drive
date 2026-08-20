@@ -53,6 +53,17 @@ const image: ObjectDescriptor = {
   etag: 'cover',
 };
 
+// onOpenObject の view/opaque 分岐だけを検証するための最小 fixture。
+const make = (name: string, contentType: string): ObjectDescriptor => ({
+  bucketId: 'photos',
+  key: name,
+  name,
+  contentType,
+  size: 10,
+  uploadedAt: '2026-08-14T00:00:00.000Z',
+  etag: name,
+});
+
 type ControlledObjectListProps = Omit<ComponentProps<typeof ObjectList>, 'selectedKeys' | 'onSelectionChange'> & {
   readonly onSelectionChange: (keys: Selection) => void;
 };
@@ -76,6 +87,30 @@ const getLastSelection = (onSelectionChange: ReturnType<typeof vi.fn>): Set<Reac
   return selection;
 };
 
+// ObjectList の必須 props をデフォルト埋めして render する。onAction の分岐だけを
+// 見たいテストで selection / delete / context menu 系 props を毎回書かないため。
+const renderObjectList = (overrides: Partial<ComponentProps<typeof ObjectList>>) => {
+  render(
+    <ObjectList
+      folders={[]}
+      objects={[]}
+      getContentUrl={getContentUrl}
+      selectedKeys={new Set()}
+      onSelectionChange={vi.fn()}
+      onDeleteRequest={noop}
+      onObjectContextMenu={noop}
+      onOpenFolder={vi.fn()}
+      onPrefetchFolder={noop}
+      onExternalFiles={noop}
+      onExternalFileError={noop}
+      onOpenObject={noop}
+      onLoadMore={noop}
+      isLoadingMore={false}
+      {...overrides}
+    />,
+  );
+};
+
 describe('ObjectList', () => {
   it('オブジェクト名を並べる', () => {
     render(
@@ -90,6 +125,7 @@ describe('ObjectList', () => {
         onPrefetchFolder={noop}
         onExternalFiles={noop}
         onExternalFileError={noop}
+        onOpenObject={noop}
         onLoadMore={noop}
         isLoadingMore={false}
       />,
@@ -112,6 +148,7 @@ describe('ObjectList', () => {
         onPrefetchFolder={noop}
         onExternalFiles={noop}
         onExternalFileError={noop}
+        onOpenObject={noop}
         onLoadMore={noop}
         isLoadingMore={false}
       />,
@@ -136,6 +173,7 @@ describe('ObjectList', () => {
         onPrefetchFolder={noop}
         onExternalFiles={noop}
         onExternalFileError={noop}
+        onOpenObject={noop}
         onLoadMore={noop}
         isLoadingMore={false}
       />,
@@ -162,6 +200,7 @@ describe('ObjectList', () => {
         onPrefetchFolder={noop}
         onExternalFiles={noop}
         onExternalFileError={noop}
+        onOpenObject={noop}
         onLoadMore={noop}
         isLoadingMore={false}
       />,
@@ -190,6 +229,7 @@ describe('ObjectList', () => {
         onPrefetchFolder={noop}
         onExternalFiles={noop}
         onExternalFileError={noop}
+        onOpenObject={noop}
         onLoadMore={noop}
         isLoadingMore={false}
       />,
@@ -217,6 +257,7 @@ describe('ObjectList', () => {
         onPrefetchFolder={noop}
         onExternalFiles={noop}
         onExternalFileError={noop}
+        onOpenObject={noop}
         onLoadMore={noop}
         isLoadingMore={false}
       />,
@@ -242,6 +283,7 @@ describe('ObjectList', () => {
         onPrefetchFolder={noop}
         onExternalFiles={noop}
         onExternalFileError={noop}
+        onOpenObject={noop}
         onLoadMore={noop}
         isLoadingMore={false}
       />,
@@ -268,6 +310,7 @@ describe('ObjectList', () => {
         onPrefetchFolder={noop}
         onExternalFiles={noop}
         onExternalFileError={noop}
+        onOpenObject={noop}
         onLoadMore={noop}
         isLoadingMore={false}
       />,
@@ -303,6 +346,7 @@ describe('ObjectList', () => {
         onPrefetchFolder={noop}
         onExternalFiles={noop}
         onExternalFileError={noop}
+        onOpenObject={noop}
         onLoadMore={noop}
         isLoadingMore={false}
       />,
@@ -331,6 +375,7 @@ describe('ObjectList', () => {
         onPrefetchFolder={noop}
         onExternalFiles={noop}
         onExternalFileError={noop}
+        onOpenObject={noop}
         onLoadMore={noop}
         isLoadingMore={false}
       />,
@@ -356,6 +401,7 @@ describe('ObjectList', () => {
         onPrefetchFolder={noop}
         onExternalFiles={noop}
         onExternalFileError={noop}
+        onOpenObject={noop}
         onLoadMore={noop}
         isLoadingMore={false}
       />,
@@ -383,6 +429,7 @@ describe('ObjectList', () => {
         onPrefetchFolder={noop}
         onExternalFiles={noop}
         onExternalFileError={noop}
+        onOpenObject={noop}
         onLoadMore={noop}
         isLoadingMore={false}
       />,
@@ -413,6 +460,7 @@ describe('ObjectList', () => {
         onPrefetchFolder={noop}
         onExternalFiles={noop}
         onExternalFileError={noop}
+        onOpenObject={noop}
         onLoadMore={noop}
         isLoadingMore={false}
       />,
@@ -446,6 +494,7 @@ describe('ObjectList', () => {
         onPrefetchFolder={noop}
         onExternalFiles={noop}
         onExternalFileError={noop}
+        onOpenObject={noop}
         onLoadMore={noop}
         isLoadingMore={false}
       />,
@@ -468,6 +517,7 @@ describe('ObjectList', () => {
         onPrefetchFolder={noop}
         onExternalFiles={noop}
         onExternalFileError={noop}
+        onOpenObject={noop}
         onLoadMore={noop}
         isLoadingMore={false}
       />,
@@ -493,6 +543,7 @@ describe('ObjectList', () => {
         onPrefetchFolder={onPrefetchFolder}
         onExternalFiles={noop}
         onExternalFileError={noop}
+        onOpenObject={noop}
         onLoadMore={noop}
         isLoadingMore={false}
       />,
@@ -518,6 +569,7 @@ describe('ObjectList', () => {
         onPrefetchFolder={onPrefetchFolder}
         onExternalFiles={noop}
         onExternalFileError={noop}
+        onOpenObject={noop}
         onLoadMore={noop}
         isLoadingMore={false}
       />,
@@ -526,5 +578,21 @@ describe('ObjectList', () => {
     await userEvent.tab();
 
     expect(onPrefetchFolder).toHaveBeenCalledWith('docs/');
+  });
+
+  it('view 可能なファイル行のダブルクリックで onOpenObject が呼ばれる', async () => {
+    const onOpenObject = vi.fn();
+    renderObjectList({ objects: [make('a.png', 'image/png')], onOpenObject });
+    const row = await screen.findByText('a.png');
+    await userEvent.dblClick(row);
+    expect(onOpenObject).toHaveBeenCalledWith('a.png');
+  });
+
+  it('opaque なファイル行のダブルクリックでは呼ばれない', async () => {
+    const onOpenObject = vi.fn();
+    renderObjectList({ objects: [make('a.bin', 'application/octet-stream')], onOpenObject });
+    const row = await screen.findByText('a.bin');
+    await userEvent.dblClick(row);
+    expect(onOpenObject).not.toHaveBeenCalled();
   });
 });

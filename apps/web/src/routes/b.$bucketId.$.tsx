@@ -1,15 +1,22 @@
 import { useQueryClient, useSuspenseInfiniteQuery } from '@tanstack/react-query';
 import { createFileRoute, useNavigate } from '@tanstack/react-router';
 import { useCallback, useMemo } from 'react';
+import { z } from 'zod';
 
 import { getApiClient } from '../api/client';
 import { objectsQuery, toPrefix } from '../queries/objects';
 import { BucketObjectActions } from './-components/bucket-object-actions/index';
 import { BucketUploadSession } from './-components/bucket-upload-session/index';
+import { ObjectViewerOverlay } from './-components/object-viewer/index';
 import * as styles from './b.$bucketId.$.styles.css';
 
 import type { ApiClient } from '@r2-drive/api/client';
 import type { ObjectDescriptor } from '@r2-drive/core';
+import type { ViewerRequest } from './-components/object-viewer/index';
+
+// URL search は「無い」状態が正当なので optional。variant への変換は useSearch 直後に行い、
+// optional をコンポーネント境界より内側に持ち込まない。
+const viewerSearchSchema = z.object({ view: z.string().optional() });
 
 // content-addressed URL。etag を ?v= に載せることで、サーバが「この URL は
 // この中身しか指さない」と判断でき immutable を返せる(戻るたびの再ダウンロードを消す)。
@@ -65,19 +72,45 @@ const BucketWorkspace = ({ client, bucketId, prefix }: BucketWorkspaceProps) => 
     if (hasNextPage) void fetchNextPage();
   }, [fetchNextPage, hasNextPage]);
 
+  const { view } = Route.useSearch();
+  const viewerRequest: ViewerRequest = useMemo(() => (view === undefined ? { kind: 'closed' } : { kind: 'open', objectKey: view }), [view]);
+
+  const handleOpenObject = useCallback(
+    (key: string) => {
+      void navigate({ to: '.', search: { view: key } });
+    },
+    [navigate],
+  );
+
+  const handleCloseViewer = useCallback(() => {
+    void navigate({ to: '.', search: {} });
+  }, [navigate]);
+
+  // replace: 50 枚めくった履歴を 50 回戻らせない。戻る 1 回で overlay ごと閉じる。
+  const handleNavigateViewer = useCallback(
+    (key: string) => {
+      void navigate({ to: '.', search: { view: key }, replace: true });
+    },
+    [navigate],
+  );
+
   return (
-    <BucketObjectActions
-      client={client}
-      bucketId={bucketId}
-      prefix={prefix}
-      folders={folders}
-      objects={objects}
-      getContentUrl={getContentUrl}
-      onOpenFolder={handleOpenFolder}
-      onPrefetchFolder={handlePrefetchFolder}
-      onLoadMore={handleLoadMore}
-      isLoadingMore={isFetchingNextPage}
-    />
+    <>
+      <BucketObjectActions
+        client={client}
+        bucketId={bucketId}
+        prefix={prefix}
+        folders={folders}
+        objects={objects}
+        getContentUrl={getContentUrl}
+        onOpenFolder={handleOpenFolder}
+        onPrefetchFolder={handlePrefetchFolder}
+        onOpenObject={handleOpenObject}
+        onLoadMore={handleLoadMore}
+        isLoadingMore={isFetchingNextPage}
+      />
+      <ObjectViewerOverlay client={client} bucketId={bucketId} objects={objects} request={viewerRequest} getContentUrl={getContentUrl} onClose={handleCloseViewer} onNavigate={handleNavigateViewer} />
+    </>
   );
 };
 
@@ -87,6 +120,7 @@ export const Route = createFileRoute('/b/$bucketId/$')({
   // 要るが、それは Access を 2 度通す往復を足すことになる。Phase 0 の受け入れ基準は
   // どれも SSR を要求しないので、このルートはクライアント描画に倒す(report 参照)。
   ssr: false,
+  validateSearch: (search) => viewerSearchSchema.parse(search),
   loader: ({ context, params }) => context.queryClient.ensureInfiniteQueryData(objectsQuery(getApiClient(), params.bucketId, toPrefix(params._splat))),
   // suspend するのはこのルートのコンポーネントそのもの(= 一覧)なので、
   // 境界はルート単位で過不足がない。TanStack Router が errorComponent の内側に
