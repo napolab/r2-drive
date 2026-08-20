@@ -1,3 +1,4 @@
+import { NO_MEDIA } from '@r2-drive/core';
 import { and, asc, count as countRows, eq, gt, ne } from 'drizzle-orm';
 
 import { contentTypeOf } from '../r2/list';
@@ -98,6 +99,8 @@ export class ObjectIndex extends SqliteStore {
   // object.name は保存しない。name は key から一意に決まる派生値なので、
   // keyPartsOf(key).name を唯一の出典にする(呼び出し側が矛盾した name を渡しても
   // 索引は key に従う)。
+  // object.media は今はまだ無視する。width / height 列が存在しない(Task 2 で
+  // schema に列を足し、ここで書き込むようになる)。
   upsert(object: ObjectDescriptor): void {
     const { name, parentPrefix, ancestorPrefixes } = keyPartsOf(object.key);
     const updates = {
@@ -205,6 +208,8 @@ export class ObjectIndex extends SqliteStore {
         size: row.size,
         uploadedAt: row.uploadedAt,
         etag: row.etag,
+        // 列がまだ無い(Task 2 で mediaOf(row.width, row.height) に置換する)。
+        media: NO_MEDIA,
       })),
       next,
     };
@@ -323,6 +328,8 @@ export class ObjectIndex extends SqliteStore {
         size: row.size,
         uploadedAt: row.uploaded_at,
         etag: row.etag,
+        // 列がまだ無い(Task 2 で mediaOf(row.width, row.height) に置換する)。
+        media: NO_MEDIA,
       })),
       next,
     };
@@ -478,6 +485,8 @@ export class ObjectIndex extends SqliteStore {
       size: object.size,
       uploadedAt: object.uploaded.toISOString(),
       etag: object.httpEtag,
+      // バックフィルは R2 の list からしか寸法を知り得ない。索引列からの導出は Task 2。
+      media: NO_MEDIA,
     });
   }
 

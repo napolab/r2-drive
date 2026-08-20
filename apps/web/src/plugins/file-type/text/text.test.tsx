@@ -1,3 +1,4 @@
+import { NO_MEDIA } from '@r2-drive/core';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -18,6 +19,7 @@ const make = (key: string, contentType: string, size = 1): ObjectDescriptor => (
   size,
   uploadedAt: '2026-01-01T00:00:00.000Z',
   etag: '"x"',
+  media: NO_MEDIA,
 });
 
 describe('textPlugin', () => {

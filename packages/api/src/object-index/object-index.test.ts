@@ -1,3 +1,4 @@
+import { NO_MEDIA } from '@r2-drive/core';
 import { env, runInDurableObject } from 'cloudflare:test';
 import { describe, expect, it } from 'vitest';
 
@@ -16,6 +17,7 @@ const descriptorOf = (key: string, overrides: Partial<ObjectDescriptor> = {}): O
   size: 10,
   uploadedAt: '2026-08-17T00:00:00.000Z',
   etag: `"etag-${key}"`,
+  media: NO_MEDIA,
   ...overrides,
 });
 

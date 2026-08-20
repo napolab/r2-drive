@@ -1,3 +1,4 @@
+import { NO_MEDIA } from '@r2-drive/core';
 import { describe, expect, it } from 'vitest';
 
 import { fileTypePlugins, resolveFileType } from './registry';
@@ -12,6 +13,7 @@ const object = (name: string, contentType: string): ObjectDescriptor => ({
   size: 1,
   uploadedAt: '2026-08-14T00:00:00.000Z',
   etag: 'e',
+  media: NO_MEDIA,
 });
 
 describe('resolveFileType', () => {

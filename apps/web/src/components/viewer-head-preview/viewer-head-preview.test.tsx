@@ -1,3 +1,4 @@
+import { NO_MEDIA } from '@r2-drive/core';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { cleanup, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -38,6 +39,7 @@ const object: ObjectDescriptor = {
   size: 2_000_000,
   uploadedAt: '2026-01-01T00:00:00.000Z',
   etag: '"x"',
+  media: NO_MEDIA,
 };
 
 describe('ViewerHeadPreview', () => {

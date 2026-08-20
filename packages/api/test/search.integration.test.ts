@@ -1,3 +1,4 @@
+import { NO_MEDIA } from '@r2-drive/core';
 import { env } from 'cloudflare:test';
 import { expect, it } from 'vitest';
 
@@ -20,6 +21,7 @@ const descriptorOf = (bucketId: string, key: string, overrides: Partial<ObjectDe
   size: 1,
   uploadedAt: '2026-08-17T00:00:00.000Z',
   etag: `"etag-${key}"`,
+  media: NO_MEDIA,
   ...overrides,
 });
 

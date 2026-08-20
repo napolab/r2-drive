@@ -1,3 +1,4 @@
+import { NO_MEDIA } from '@r2-drive/core';
 import { cleanup, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { useCallback, useState } from 'react';
@@ -23,6 +24,7 @@ const objects: readonly ObjectDescriptor[] = [
     size: 10,
     uploadedAt: '2026-08-14T00:00:00.000Z',
     etag: 'readme',
+    media: NO_MEDIA,
   },
 ];
 

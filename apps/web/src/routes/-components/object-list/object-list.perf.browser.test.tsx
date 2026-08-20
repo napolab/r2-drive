@@ -10,6 +10,7 @@
 // 回るため、ここで出る数字は絶対値ではなく「同条件での相対値」として扱うこと。
 // 体感の裏取りは実アプリを開いて DevTools の performance trace で行う。
 
+import { NO_MEDIA } from '@r2-drive/core';
 import { flushSync } from 'react-dom';
 import { createRoot } from 'react-dom/client';
 import { expect, it } from 'vitest';
@@ -62,6 +63,7 @@ const buildObject = (index: number): ObjectDescriptor => ({
   size: 1024 + index,
   uploadedAt: '2026-08-14T00:00:00.000Z',
   etag: `etag-${index}`,
+  media: NO_MEDIA,
 });
 
 const objects: readonly ObjectDescriptor[] = Array.from({ length: OBJECT_COUNT }, (_unused, index) => buildObject(index));

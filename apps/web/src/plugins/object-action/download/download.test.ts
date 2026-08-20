@@ -1,3 +1,4 @@
+import { NO_MEDIA } from '@r2-drive/core';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { downloadAction } from './index';
@@ -13,6 +14,7 @@ const object: ObjectDescriptor = {
   size: 10,
   uploadedAt: '2026-08-14T00:00:00.000Z',
   etag: 'readme',
+  media: NO_MEDIA,
 };
 
 const getDescriptor = (): ActionDescriptor =>

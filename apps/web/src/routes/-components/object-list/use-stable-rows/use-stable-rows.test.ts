@@ -1,3 +1,4 @@
+import { NO_MEDIA } from '@r2-drive/core';
 import { renderHook } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
 
@@ -13,6 +14,7 @@ const createObject = (key: string, etag: string): ObjectDescriptor => ({
   size: 10,
   uploadedAt: '2026-08-14T00:00:00.000Z',
   etag,
+  media: NO_MEDIA,
 });
 
 const createFolder = (prefix: string): FolderDescriptor => ({

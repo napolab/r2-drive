@@ -1,3 +1,4 @@
+import { NO_MEDIA } from '@r2-drive/core';
 import { cleanup, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -16,6 +17,7 @@ const objects: readonly ObjectDescriptor[] = Array.from({ length: 7 }, (_, index
   size: index,
   uploadedAt: '2026-08-14T00:00:00.000Z',
   etag: `etag-${index}`,
+  media: NO_MEDIA,
 }));
 
 describe('DeleteDialog', () => {

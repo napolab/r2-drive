@@ -1,3 +1,4 @@
+import { NO_MEDIA } from '@r2-drive/core';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
@@ -21,6 +22,7 @@ const make = (key: string, contentType: string): ObjectDescriptor => ({
   size: 1024,
   uploadedAt: '2026-01-01T00:00:00.000Z',
   etag: '"x"',
+  media: NO_MEDIA,
 });
 
 const objects = [make('a.png', 'image/png'), make('b.bin', 'application/octet-stream'), make('c.jpg', 'image/jpeg')];

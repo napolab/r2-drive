@@ -1,4 +1,4 @@
-import { R2OperationError } from '@r2-drive/core';
+import { NO_MEDIA, R2OperationError } from '@r2-drive/core';
 import { fromPromise } from 'neverthrow';
 import mime from 'mime';
 
@@ -57,6 +57,8 @@ export const listObjects = (input: ListInput): ResultAsync<ObjectPage, DriveErro
         size: object.size,
         uploadedAt: object.uploaded.toISOString(),
         etag: object.httpEtag,
+        // R2 は寸法を知らない。索引列からの導出は Task 2。
+        media: NO_MEDIA,
       })),
     next: listed.truncated ? { kind: 'more', cursor: listed.cursor } : { kind: 'end' },
   }));

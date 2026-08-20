@@ -1,4 +1,4 @@
-import { R2OperationError, UploadSessionError } from '@r2-drive/core';
+import { NO_MEDIA, R2OperationError, UploadSessionError } from '@r2-drive/core';
 import { zValidator } from '@hono/zod-validator';
 import { Hono } from 'hono';
 import { fromPromise } from 'neverthrow';
@@ -49,6 +49,8 @@ export const uploads = new Hono<HonoEnv>()
               size: object.size,
               uploadedAt: object.uploaded.toISOString(),
               etag: object.httpEtag,
+              // R2 は寸法を知らない。索引列からの導出は Task 2。
+              media: NO_MEDIA,
             }).map(() => object);
           })
           .match(
@@ -129,6 +131,8 @@ export const uploads = new Hono<HonoEnv>()
               size: object.size,
               uploadedAt: object.uploaded.toISOString(),
               etag: object.httpEtag,
+              // R2 は寸法を知らない。索引列からの導出は Task 2。
+              media: NO_MEDIA,
             }).map(() => object);
           })
           .match(

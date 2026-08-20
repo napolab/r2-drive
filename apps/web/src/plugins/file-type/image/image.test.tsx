@@ -1,3 +1,4 @@
+import { NO_MEDIA } from '@r2-drive/core';
 import { cleanup, fireEvent, render } from '@testing-library/react';
 import { afterEach, describe, expect, it } from 'vitest';
 
@@ -15,6 +16,7 @@ const object: ObjectDescriptor = {
   size: 128,
   uploadedAt: '2026-08-14T00:00:00.000Z',
   etag: 'cover',
+  media: NO_MEDIA,
 };
 
 const getContentUrl = () => '/api/buckets/photos/content/cover%20image.png';

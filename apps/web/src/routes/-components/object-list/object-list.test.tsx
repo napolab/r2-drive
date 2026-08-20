@@ -1,3 +1,4 @@
+import { NO_MEDIA } from '@r2-drive/core';
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { useCallback, useState } from 'react';
@@ -34,6 +35,7 @@ const objects: readonly ObjectDescriptor[] = Array.from({ length: 5 }, (_, i) =>
   size: 10,
   uploadedAt: '2026-08-14T00:00:00.000Z',
   etag: `e${i}`,
+  media: NO_MEDIA,
 }));
 
 const [firstObject, secondObject] = objects;
@@ -51,6 +53,7 @@ const image: ObjectDescriptor = {
   size: 128,
   uploadedAt: '2026-08-14T00:00:00.000Z',
   etag: 'cover',
+  media: NO_MEDIA,
 };
 
 // onOpenObject の view/opaque 分岐だけを検証するための最小 fixture。
@@ -62,6 +65,7 @@ const make = (name: string, contentType: string): ObjectDescriptor => ({
   size: 10,
   uploadedAt: '2026-08-14T00:00:00.000Z',
   etag: name,
+  media: NO_MEDIA,
 });
 
 type ControlledObjectListProps = Omit<ComponentProps<typeof ObjectList>, 'selectedKeys' | 'onSelectionChange'> & {
@@ -331,6 +335,7 @@ describe('ObjectList', () => {
       size: index,
       uploadedAt: '2026-08-14T00:00:00.000Z',
       etag: `offscreen-${index}`,
+      media: NO_MEDIA,
     }));
     const onSelectionChange = vi.fn();
     render(
