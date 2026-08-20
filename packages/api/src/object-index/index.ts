@@ -6,7 +6,7 @@ import { resolveBucket } from '../r2/registry';
 import { listCursor, searchCursor } from './cursor/index';
 import { BucketMismatchError } from './errors';
 import { keyPartsOf } from './key-parts/index';
-import { meta, objects, prefixes } from './schema';
+import { backfillTombstones, meta, objects, prefixes } from './schema';
 import { SqliteStore } from './sqlite-store';
 
 import type { BackfillStatus } from './status';
@@ -135,7 +135,22 @@ export class ObjectIndex extends SqliteStore {
     this.db.transaction((tx) => {
       tx.delete(objects).where(eq(objects.key, key)).run();
       this.ctx.storage.sql.exec(`DELETE FROM objects_fts WHERE key = ?`, key);
+      this.#tombstoneIfBackfillRunning(tx, key);
     });
+  }
+
+  // バックフィル走行中(meta.backfill_state === 'running')の remove だけトゥームストーンを
+  // 書く(I3)。#indexPage の `bucket.list()` スナップショットは呼び出し時点の R2 の
+  // 状態なので、その窓の間に届いた live remove は「消したはずのキーがまだリストに載って
+  // いる」状態を作る。トゥームストーンはその目印であり、#backfillUpsert がこれを見て
+  // 再挿入をスキップする。remove の呼び出しトランザクションの中で行うことで、削除と
+  // トゥームストーンの書き込みを不可分にする(走行中でない remove はここで何もしない
+  // ので、通常の削除経路にオーバーヘッドを足さない)。
+  #tombstoneIfBackfillRunning(tx: Tx, key: string): void {
+    const state = tx.select({ v: meta.v }).from(meta).where(eq(meta.k, BACKFILL_STATE_KEY)).get()?.v;
+
+    if (state !== 'running') return;
+    tx.insert(backfillTombstones).values({ key }).onConflictDoNothing().run();
   }
 
   count(): number {
@@ -361,6 +376,9 @@ export class ObjectIndex extends SqliteStore {
     this.#metaClear(BACKFILL_CURSOR_KEY);
     this.#metaClear(BACKFILL_REASON_KEY);
     this.#metaSet(BACKFILL_PAGES_KEY, '0');
+    // backfill_tombstones は meta と違い bucket_id を同居させていないので一括クリアしてよい
+    // (I3)。前回の走行の残骸を持ち越すと、今回の走行で有効な行まで永遠にスキップされる。
+    this.db.delete(backfillTombstones).run();
     this.#metaSet(BACKFILL_STATE_KEY, 'running');
     await this.ctx.storage.setAlarm(Date.now());
 
@@ -403,12 +421,7 @@ export class ObjectIndex extends SqliteStore {
     const cursor = this.#metaGet(BACKFILL_CURSOR_KEY);
 
     try {
-      // include: ['httpMetadata'] は付けない(Ruling 20。BACKFILL_PAGE のコメント参照)。
-      // prefix / delimiter も付けない。バックフィルはバケット全体を平坦に舐める。
-      //
-      // exactOptionalPropertyTypes 下では cursor: undefined を明示的に渡せないので、
-      // キー自体を spread の有無で作る(r2/list.ts の listOptionsOf と同じ書き方)。
-      const listed = await bucket.list({ limit: BACKFILL_PAGE, ...(cursor === undefined ? {} : { cursor }) });
+      const listed = await this.listBackfillPage(bucket, cursor);
       for (const object of listed.objects) this.#indexObject(bucketId, object);
       this.#bumpPages();
 
@@ -419,10 +432,29 @@ export class ObjectIndex extends SqliteStore {
         return;
       }
       this.#metaClear(BACKFILL_CURSOR_KEY);
+      // 完了したのでトゥームストーンはもう要らない(I3)。次回の startBackfill を待たず
+      // ここで消すことで、完了後の remove が「もう走っていないバックフィルのための
+      // トゥームストーン」を書かないのと対称にする。
+      this.db.delete(backfillTombstones).run();
       this.#metaSet(BACKFILL_STATE_KEY, 'complete');
     } catch (cause) {
       this.#markFailed(cause instanceof Error ? `${cause.name}: ${cause.message}` : `${cause}`);
     }
+  }
+
+  // R2 の list を叩く箇所を 1 つに切り出したもの。ここが await の間だけ DO の入力ゲートが
+  // 開き、live な remove() / upsert() が割り込める窓になる(I3)。protected にしているのは
+  // テストからこの窓を決定的に作るための seam であり、production の分岐ではない
+  // (test/worker-entry.ts の ObjectIndexUnderTest が override してスナップショット取得
+  // 直後に割り込み操作を挟む)。
+  //
+  // include: ['httpMetadata'] は付けない(Ruling 20。BACKFILL_PAGE のコメント参照)。
+  // prefix / delimiter も付けない。バックフィルはバケット全体を平坦に舐める。
+  //
+  // exactOptionalPropertyTypes 下では cursor: undefined を明示的に渡せないので、
+  // キー自体を spread の有無で作る(r2/list.ts の listOptionsOf と同じ書き方)。
+  protected async listBackfillPage(bucket: R2Bucket, cursor: string | undefined): Promise<R2Objects> {
+    return bucket.list({ limit: BACKFILL_PAGE, ...(cursor === undefined ? {} : { cursor }) });
   }
 
   // Ruling 21: 0 バイトのフォルダマーカー(末尾 '/' のキー)も除外せず入れる。索引は
@@ -438,7 +470,7 @@ export class ObjectIndex extends SqliteStore {
   // name は upsert が keyPartsOf(key) から再計算するので渡した値は使われないが、
   // ObjectDescriptor の必須フィールドなので同じ導出で埋める。
   #indexObject(bucketId: string, object: R2Object): void {
-    this.upsert({
+    this.#backfillUpsert({
       bucketId,
       key: object.key,
       name: keyPartsOf(object.key).name,
@@ -449,6 +481,34 @@ export class ObjectIndex extends SqliteStore {
     });
   }
 
+  // バックフィルの適用経路専用(I3)。live 経路(remove / upsert)との競合を 2 通り防ぐ。
+  //
+  // - ゴースト行: list のスナップショットを取った後に live remove されたキーは
+  //   #tombstoneIfBackfillRunning がトゥームストーンを残しているので、ここでスキップする。
+  //   スキップしないと、消えたはずのキーを再挿入してしまい、次のバックフィルまで
+  //   自己修復しない幽霊行になる。
+  // - スケール上書き: list 後に live upsert された行は、その uploadedAt がスナップ
+  //   ショットの uploadedAt 以上ならスキップする。「既存行が今回のスナップショットと
+  //   同じかそれより新しい」は、その行が live 経路(スナップショットより後)で書かれた
+  //   ことの証拠になる。uploadedAt は ISO8601(常に UTC の Z 表記)で保存しているため、
+  //   文字列としての `>=` 比較がそのまま時系列比較になる。
+  //
+  // 行が存在しない、または既存行がスナップショットより古い場合はそのまま upsert に
+  // 委譲する。これにより「バックフィルを何度叩いても R2 の現在状態に追いつく」という
+  // 冪等性は変わらない(既存コメント参照)。
+  #backfillUpsert(descriptor: ObjectDescriptor): void {
+    if (this.#isTombstoned(descriptor.key)) return;
+
+    const existing = this.db.select({ uploadedAt: objects.uploadedAt }).from(objects).where(eq(objects.key, descriptor.key)).get();
+    if (existing !== undefined && existing.uploadedAt >= descriptor.uploadedAt) return;
+
+    this.upsert(descriptor);
+  }
+
+  #isTombstoned(key: string): boolean {
+    return this.db.select({ key: backfillTombstones.key }).from(backfillTombstones).where(eq(backfillTombstones.key, key)).get() !== undefined;
+  }
+
   // 1 ページ処理するたびに +1。BACKFILL_PAGES_KEY のコメント参照。
   #bumpPages(): void {
     this.#metaSet(BACKFILL_PAGES_KEY, `${parseInt(this.#metaGet(BACKFILL_PAGES_KEY) ?? '0', 10) + 1}`);
@@ -456,6 +516,8 @@ export class ObjectIndex extends SqliteStore {
 
   #markFailed(reason: string): void {
     this.#metaSet(BACKFILL_REASON_KEY, reason);
+    // 失敗でも走行は終端に達しているので、complete と同様にトゥームストーンを消す(I3)。
+    this.db.delete(backfillTombstones).run();
     this.#metaSet(BACKFILL_STATE_KEY, 'failed');
   }
 

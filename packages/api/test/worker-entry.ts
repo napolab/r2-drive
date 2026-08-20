@@ -1,11 +1,18 @@
-import { eq } from 'drizzle-orm';
+import { count as countRows, eq } from 'drizzle-orm';
 
 import { api } from '../src/index';
 import { ObjectIndex } from '../src/object-index/index';
-import { meta, objects, prefixes } from '../src/object-index/schema';
+import { backfillTombstones, meta, objects, prefixes } from '../src/object-index/schema';
+
+import type { ObjectDescriptor } from '@r2-drive/core';
 
 type ObjectRow = typeof objects.$inferSelect;
 type PrefixRow = typeof prefixes.$inferSelect;
+
+// I3 の競合窓をテストから決定的に作るための仕込み。listBackfillPage override が
+// 1 ページ目の list 直後・適用前にちょうど 1 回だけ実行する。structured clone を
+// 越えて RPC 引数として渡すため、関数ではなくデータ(discriminated union)で表す。
+type BackfillRace = { readonly kind: 'none' } | { readonly kind: 'remove'; readonly key: string } | { readonly kind: 'upsert'; readonly descriptor: ObjectDescriptor };
 
 // テスト専用の DO クラス。production の ObjectIndex に置いてよいのは upsert / remove /
 // count だけで、覗き見用のメソッドや DO SQLite の性質を測る probe を本番の RPC 表面に
@@ -19,8 +26,46 @@ type PrefixRow = typeof prefixes.$inferSelect;
 // メソッドは必ず method shorthand で書くこと。arrow property は prototype ではなく
 // インスタンスに乗るため RPC で公開されない。
 export class ObjectIndexUnderTest extends ObjectIndex {
+  #backfillRace: BackfillRace = { kind: 'none' };
+
+  // 次回の listBackfillPage 呼び出しに 1 回だけ効く割り込みを仕込む。
+  setBackfillRace(race: BackfillRace): void {
+    this.#backfillRace = race;
+  }
+
+  // I3 の窓の再現: 実際の list を取った直後、ページを索引に適用する前に、仕込んだ
+  // live 操作(remove / upsert)を割り込ませる。使ったら 'none' に戻すので 1 回しか
+  // 効かない(複数ページに渡るテストでは 1 ページ目だけで割り込みが起きる)。
+  override async listBackfillPage(bucket: R2Bucket, cursor: string | undefined): Promise<R2Objects> {
+    const listed = await super.listBackfillPage(bucket, cursor);
+    const race = this.#backfillRace;
+    this.#backfillRace = { kind: 'none' };
+
+    switch (race.kind) {
+      case 'none':
+        break;
+      case 'remove':
+        await bucket.delete(race.key);
+        this.remove(race.key);
+        break;
+      case 'upsert':
+        this.upsert(race.descriptor);
+        break;
+    }
+
+    return listed;
+  }
+
   debugRow(key: string): ObjectRow | undefined {
     return this.db.select().from(objects).where(eq(objects.key, key)).get();
+  }
+
+  // backfill_tombstones の行数。I3 のトゥームストーンが「走行中だけ書かれ、終端で
+  // クリアされる」ことを覗くための窓。
+  debugTombstoneCount(): number {
+    const row = this.db.select({ total: countRows() }).from(backfillTombstones).get();
+
+    return row?.total ?? 0;
   }
 
   // parent_prefix も返す。prefix 列だけを返していたため「prefixes.parent_prefix を
