@@ -25,3 +25,10 @@ describe('videoPlugin preview', () => {
     expect(container.querySelector('svg')?.dataset.glyph).toBe('video');
   });
 });
+
+describe('videoPlugin capability', () => {
+  it('video は view capability を持つ', () => {
+    const result = videoPlugin.run(object);
+    expect(result.isOk() && result.value.capability.kind).toBe('view');
+  });
+});
