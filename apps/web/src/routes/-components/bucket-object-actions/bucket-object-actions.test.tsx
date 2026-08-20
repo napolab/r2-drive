@@ -74,6 +74,8 @@ const renderActions = (queryClient: QueryClient, rows: Rows) => {
           folders={nextRows.folders}
           objects={nextRows.objects}
           getContentUrl={() => '/content'}
+          viewMode="tiles"
+          onViewModeChange={vi.fn()}
           onOpenFolder={vi.fn()}
           onPrefetchFolder={vi.fn()}
           onOpenObject={vi.fn()}

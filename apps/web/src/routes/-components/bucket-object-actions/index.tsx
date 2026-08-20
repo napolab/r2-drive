@@ -15,6 +15,7 @@ import type { Key, Selection } from 'react-aria-components';
 import type { ActionDescriptor } from '../../../plugins/object-action/types';
 import type { ActionNotice } from '../bucket-workspace-uploads/index';
 import type { DeleteDialogState } from '../delete-dialog/index';
+import type { ViewMode } from '../gallery/resolve-view-mode';
 import type { ObjectContextMenuState } from '../object-context-menu/index';
 
 type Props = {
@@ -24,6 +25,8 @@ type Props = {
   readonly folders: readonly FolderDescriptor[];
   readonly objects: readonly ObjectDescriptor[];
   readonly getContentUrl: (object: ObjectDescriptor) => string;
+  readonly viewMode: ViewMode;
+  readonly onViewModeChange: (mode: ViewMode) => void;
   readonly onOpenFolder: (prefix: string) => void;
   readonly onPrefetchFolder: (prefix: string) => void;
   readonly onOpenObject: (key: string) => void;
@@ -63,7 +66,21 @@ const getDialogObjects = (state: DeleteDialogState): readonly ObjectDescriptor[]
 
 const getErrorMessage = (error: unknown): string => (error instanceof Error ? error.message : 'ファイル操作に失敗しました');
 
-export const BucketObjectActions = ({ client, bucketId, prefix, folders, objects, getContentUrl, onOpenFolder, onPrefetchFolder, onOpenObject, onLoadMore, isLoadingMore }: Props) => {
+export const BucketObjectActions = ({
+  client,
+  bucketId,
+  prefix,
+  folders,
+  objects,
+  getContentUrl,
+  viewMode,
+  onViewModeChange,
+  onOpenFolder,
+  onPrefetchFolder,
+  onOpenObject,
+  onLoadMore,
+  isLoadingMore,
+}: Props) => {
   const queryClient = useQueryClient();
   const queryKey = objectsQuery(client, bucketId, prefix).queryKey;
   const [selectedKeys, setSelectedKeys] = useState<Selection>(new Set());
@@ -170,6 +187,8 @@ export const BucketObjectActions = ({ client, bucketId, prefix, folders, objects
         folders={folders}
         objects={objects}
         getContentUrl={getContentUrl}
+        viewMode={viewMode}
+        onViewModeChange={onViewModeChange}
         selectedKeys={selectedKeys}
         onSelectionChange={handleSelectionChange}
         onDeleteRequest={handleDeleteRequest}

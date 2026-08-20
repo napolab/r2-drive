@@ -7,16 +7,20 @@ import { getApiClient } from '../api/client';
 import { objectsQuery, toPrefix } from '../queries/objects';
 import { BucketObjectActions } from './-components/bucket-object-actions/index';
 import { BucketUploadSession } from './-components/bucket-upload-session/index';
+import { isGalleryImage } from './-components/gallery/index';
+import { resolveViewMode } from './-components/gallery/resolve-view-mode';
 import { ObjectViewerOverlay } from './-components/object-viewer/index';
 import * as styles from './b.$bucketId.$.styles.css';
 
 import type { ApiClient } from '@r2-drive/api/client';
 import type { ObjectDescriptor } from '@r2-drive/core';
+import type { ViewMode } from './-components/gallery/resolve-view-mode';
 import type { ViewerRequest } from './-components/object-viewer/index';
 
 // URL search は「無い」状態が正当なので optional。variant への変換は useSearch 直後に行い、
-// optional をコンポーネント境界より内側に持ち込まない。
-const viewerSearchSchema = z.object({ view: z.string().optional() });
+// optional をコンポーネント境界より内側に持ち込まない。gallery は無指定で表す
+// (既定値を URL に書かない) — `mode` は 'tiles' の存在だけが意味を持つ。
+const viewerSearchSchema = z.object({ view: z.string().optional(), mode: z.enum(['tiles']).optional() });
 
 // content-addressed URL。etag を ?v= に載せることで、サーバが「この URL は
 // この中身しか指さない」と判断でき immutable を返せる(戻るたびの再ダウンロードを消す)。
@@ -72,24 +76,39 @@ const BucketWorkspace = ({ client, bucketId, prefix }: BucketWorkspaceProps) => 
     if (hasNextPage) void fetchNextPage();
   }, [fetchNextPage, hasNextPage]);
 
-  const { view } = Route.useSearch();
+  const { view, mode } = Route.useSearch();
   const viewerRequest: ViewerRequest = useMemo(() => (view === undefined ? { kind: 'closed' } : { kind: 'open', objectKey: view }), [view]);
+  // 画像が 1 件も無いフォルダはギャラリーにしても空の帯にしかならないので、
+  // 無指定でも自動的にタイルへ落ちる(resolveViewMode)。
+  const viewMode = useMemo(() => resolveViewMode(mode, objects.some(isGalleryImage)), [mode, objects]);
 
+  // 関数形の search updater で前の値(mode / view)を保ったまま片方だけ書き換える。
+  // オブジェクトリテラルで置き換えると、view を開いた瞬間に mode が消えて
+  // ビューアを閉じたときギャラリーへ戻ってしまう(逆方向も同様)。
   const handleOpenObject = useCallback(
     (key: string) => {
-      void navigate({ to: '.', search: { view: key } });
+      void navigate({ to: '.', search: (prev) => ({ ...prev, view: key }) });
     },
     [navigate],
   );
 
   const handleCloseViewer = useCallback(() => {
-    void navigate({ to: '.', search: {} });
+    void navigate({ to: '.', search: (prev) => ({ ...prev, view: undefined }) });
   }, [navigate]);
 
   // replace: 50 枚めくった履歴を 50 回戻らせない。戻る 1 回で overlay ごと閉じる。
   const handleNavigateViewer = useCallback(
     (key: string) => {
-      void navigate({ to: '.', search: { view: key }, replace: true });
+      void navigate({ to: '.', search: (prev) => ({ ...prev, view: key }), replace: true });
+    },
+    [navigate],
+  );
+
+  // トグルは履歴に残す(replace: false)。view は触らない — 表示モードを
+  // 切り替えてもビューアが開いていれば開いたままにする。
+  const handleViewModeChange = useCallback(
+    (next: ViewMode) => {
+      void navigate({ to: '.', search: (prev) => ({ ...prev, mode: next === 'tiles' ? 'tiles' : undefined }), replace: false });
     },
     [navigate],
   );
@@ -103,6 +122,8 @@ const BucketWorkspace = ({ client, bucketId, prefix }: BucketWorkspaceProps) => 
         folders={folders}
         objects={objects}
         getContentUrl={getContentUrl}
+        viewMode={viewMode}
+        onViewModeChange={handleViewModeChange}
         onOpenFolder={handleOpenFolder}
         onPrefetchFolder={handlePrefetchFolder}
         onOpenObject={handleOpenObject}
