@@ -16,11 +16,3 @@ export const viewerAudio = css({
   w: '[100%]',
   maxW: '[calc(var(--sizes-grid-cell) * 20)]',
 });
-
-export const viewerErrorRoot = css({
-  display: 'grid',
-  gap: 'element',
-  placeItems: 'center',
-  p: 'block',
-  color: 'fg.default',
-});

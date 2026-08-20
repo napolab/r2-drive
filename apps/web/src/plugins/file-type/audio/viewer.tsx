@@ -1,25 +1,18 @@
 import { useCallback, useState } from 'react';
-import { Link } from 'react-aria-components';
 
 import { resolvePlayback } from '../../playback/registry';
+import { MediaLoadError } from '../media-load-error';
 import * as styles from './styles.css';
 
 import type { ViewerProps } from '../types';
 
-const MediaLoadFailure = ({ object, getContentUrl, message }: ViewerProps & { readonly message: string }) => (
-  <div className={styles.viewerErrorRoot} role="alert">
-    <p>{message}</p>
-    <Link href={getContentUrl(object)} download={object.name}>
-      ダウンロード
-    </Link>
-  </div>
-);
-
 const AudioViewer = ({ object, getContentUrl }: ViewerProps) => {
-  const [hasLoadError, setHasLoadError] = useState(false);
-  const handleError = useCallback(() => setHasLoadError(true), []);
+  const [loadError, setLoadError] = useState<MediaLoadError | undefined>(undefined);
+  const handleError = useCallback(() => setLoadError(new MediaLoadError('音声を読み込めませんでした')), []);
 
-  if (hasLoadError) return <MediaLoadFailure object={object} getContentUrl={getContentUrl} message="音声を読み込めませんでした" />;
+  // audio の onError は ErrorBoundary に届かないので、いったん state に落として
+  // render 中に throw する。overlay 側の ViewerErrorBoundary がここで拾う。
+  if (loadError !== undefined) throw loadError;
 
   return resolvePlayback({ object, getContentUrl }).match(
     (playback) => {
@@ -37,7 +30,10 @@ const AudioViewer = ({ object, getContentUrl }: ViewerProps) => {
         }
       }
     },
-    () => <MediaLoadFailure object={object} getContentUrl={getContentUrl} message="再生ソースを解決できませんでした" />,
+    () => {
+      // render 中の throw で ViewerErrorBoundary に委譲する。
+      throw new MediaLoadError('再生ソースを解決できませんでした');
+    },
   );
 };
 

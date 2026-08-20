@@ -5,11 +5,3 @@ export const viewerVideo = css({
   maxH: '[100%]',
   m: 'auto',
 });
-
-export const viewerErrorRoot = css({
-  display: 'grid',
-  gap: 'element',
-  placeItems: 'center',
-  p: 'block',
-  color: 'fg.default',
-});

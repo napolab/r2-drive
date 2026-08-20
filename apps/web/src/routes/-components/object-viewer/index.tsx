@@ -4,6 +4,7 @@ import { Button, Dialog, Link, Modal, ModalOverlay } from 'react-aria-components
 
 import { findCause, isInstanceOf, ObjectNotFoundError } from '@r2-drive/core';
 
+import { MediaLoadError } from '../../../plugins/file-type/media-load-error';
 import { resolveFileType } from '../../../plugins/file-type/registry';
 import { objectQuery } from '../../../queries/object';
 import { findAdjacentViewable } from './use-viewer-navigation/index';
@@ -173,6 +174,18 @@ const FetchedViewer = ({ client, bucketId, objectKey, getContentUrl }: FetchedVi
 type ResolvedViewerProps = { readonly object: ObjectDescriptor; readonly getContentUrl: (object: ObjectDescriptor) => string };
 
 const ResolvedViewer = ({ object, getContentUrl }: ResolvedViewerProps) => {
+  // image/video/audio viewer が render 中に throw する MediaLoadError は種類別のメッセージを
+  // 出し、それ以外(chunk load 失敗などの汎用エラー)は従来どおりの汎用メッセージに落とす。
+  const renderFallback = useCallback(
+    (error: unknown): ReactNode => {
+      const mediaLoadError = findCause(error, isInstanceOf(MediaLoadError));
+      if (mediaLoadError !== undefined) return <MediaLoadFailureNotice message={mediaLoadError.message} object={object} getContentUrl={getContentUrl} />;
+
+      return <ViewerLoadFailure object={object} getContentUrl={getContentUrl} />;
+    },
+    [object, getContentUrl],
+  );
+
   return resolveFileType(object).match(
     (match) => {
       const capability = match.capability;
@@ -180,10 +193,10 @@ const ResolvedViewer = ({ object, getContentUrl }: ResolvedViewerProps) => {
         case 'view':
           return (
             // object の identity(bucketId + key + etag)を key にして、prev/next で別ファイルへ
-            // 移動したときにエラーバウンダリと配下(画像/動画/音声の hasLoadError など)を丸ごと
+            // 移動したときにエラーバウンダリと配下(画像/動画/音声の loadError など)を丸ごと
             // 再マウントする。key が無いと同じツリー位置で reconcile され、一度失敗した
-            // hasError / hasLoadError が次のファイルにまで持ち越されてしまう。
-            <ViewerErrorBoundary key={`${object.bucketId}:${object.key}:${object.etag}`} fallback={<ViewerLoadFailure object={object} getContentUrl={getContentUrl} />}>
+            // 状態が次のファイルにまで持ち越されてしまう。
+            <ViewerErrorBoundary key={`${object.bucketId}:${object.key}:${object.etag}`} renderFallback={renderFallback}>
               <Suspense fallback={<p className={styles.stateNotice}>読み込み中</p>}>
                 <capability.Viewer object={object} getContentUrl={getContentUrl} />
               </Suspense>
@@ -220,17 +233,37 @@ const ViewerLoadFailure = ({ object, getContentUrl }: ResolvedViewerProps) => (
   </div>
 );
 
-type ViewerErrorBoundaryProps = { readonly fallback: ReactNode; readonly children: ReactNode };
-type ViewerErrorBoundaryState = { readonly hasError: boolean };
+type MediaLoadFailureNoticeProps = ResolvedViewerProps & { readonly message: string };
+
+const MediaLoadFailureNotice = ({ object, getContentUrl, message }: MediaLoadFailureNoticeProps) => (
+  <div className={styles.stateNoticeGroup} role="alert">
+    <p>{message}</p>
+    <Link href={getContentUrl(object)} download={object.name}>
+      ダウンロード
+    </Link>
+  </div>
+);
+
+type ViewerErrorBoundaryProps = { readonly renderFallback: (error: unknown) => ReactNode; readonly children: ReactNode };
+type ViewerErrorBoundaryState = { readonly kind: 'ok' } | { readonly kind: 'failed'; readonly error: unknown };
 
 class ViewerErrorBoundary extends Component<ViewerErrorBoundaryProps, ViewerErrorBoundaryState> {
-  override state: ViewerErrorBoundaryState = { hasError: false };
+  override state: ViewerErrorBoundaryState = { kind: 'ok' };
 
-  static getDerivedStateFromError(): ViewerErrorBoundaryState {
-    return { hasError: true };
+  static getDerivedStateFromError(error: unknown): ViewerErrorBoundaryState {
+    return { kind: 'failed', error };
   }
 
   override render() {
-    return this.state.hasError ? this.props.fallback : this.props.children;
+    switch (this.state.kind) {
+      case 'ok':
+        return this.props.children;
+      case 'failed':
+        return this.props.renderFallback(this.state.error);
+      default: {
+        const _exhaustive: never = this.state;
+        throw new Error(`unhandled state: ${JSON.stringify(_exhaustive)}`);
+      }
+    }
   }
 }

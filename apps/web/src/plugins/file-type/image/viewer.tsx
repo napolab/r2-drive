@@ -1,24 +1,17 @@
 import { useCallback, useState } from 'react';
-import { Link } from 'react-aria-components';
 
+import { MediaLoadError } from '../media-load-error';
 import * as styles from './styles.css';
 
 import type { ViewerProps } from '../types';
 
 const ImageViewer = ({ object, getContentUrl }: ViewerProps) => {
-  const [hasLoadError, setHasLoadError] = useState(false);
-  const handleError = useCallback(() => setHasLoadError(true), []);
+  const [loadError, setLoadError] = useState<MediaLoadError | undefined>(undefined);
+  const handleError = useCallback(() => setLoadError(new MediaLoadError('画像を読み込めませんでした')), []);
 
-  if (hasLoadError) {
-    return (
-      <div className={styles.viewerErrorRoot} role="alert">
-        <p>画像を読み込めませんでした</p>
-        <Link href={getContentUrl(object)} download={object.name}>
-          ダウンロード
-        </Link>
-      </div>
-    );
-  }
+  // img の onError は ErrorBoundary に届かないので、いったん state に落として
+  // render 中に throw する。overlay 側の ViewerErrorBoundary がここで拾う。
+  if (loadError !== undefined) throw loadError;
 
   return <img className={styles.viewerImage} src={getContentUrl(object)} alt={object.name} onError={handleError} />;
 };

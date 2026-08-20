@@ -1,12 +1,17 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { render, screen, within } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { ObjectViewerOverlay } from './index';
 
 import type { ApiClient } from '@r2-drive/api/client';
 import type { ObjectDescriptor } from '@r2-drive/core';
+
+// このファイルの他テストは request.kind: 'open' でダイアログを開いたまま終わるものが多く、
+// cleanup が無いと次の it() の DOM に残り続けて `screen.findByAltText` 等が
+// 複数マッチで失敗する(同じ 'a.png' を複数の it() が開くため)。
+afterEach(cleanup);
 
 const make = (key: string, contentType: string): ObjectDescriptor => ({
   bucketId: 'b',
@@ -76,6 +81,21 @@ describe('ObjectViewerOverlay', () => {
     renderOverlay({ request: { kind: 'open', objectKey: 'b.bin' } });
     await screen.findByRole('dialog');
     expect(await screen.findByText(/表示できません/)).toBeTruthy();
+  });
+
+  it('画像の読込に失敗すると MediaLoadError のメッセージとダウンロードリンクを出す(ErrorBoundary の出し分け)', async () => {
+    renderOverlay();
+    const image = await screen.findByAltText('a.png');
+
+    // <img onError> は throw できないので viewer は render 中に throw する。
+    // ここでは実際の失敗経路(onError イベント)から ErrorBoundary までを通しで確認する。
+    fireEvent.error(image);
+
+    const failure = await screen.findByRole('alert');
+    expect(failure.textContent).toContain('画像を読み込めませんでした');
+
+    const downloadLink = within(failure).getByRole('link', { name: 'ダウンロード' });
+    expect(downloadLink.getAttribute('href')).toBe('/content/a.png');
   });
 
   it('あるファイルでビューアが失敗しても、次のファイルへ移動すればエラー表示が残らない(object 単位でエラーバウンダリがリセットされる)', async () => {
