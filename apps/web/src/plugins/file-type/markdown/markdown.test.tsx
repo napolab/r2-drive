@@ -25,3 +25,10 @@ describe('markdownPlugin preview', () => {
     expect(container.querySelector('svg')?.dataset.glyph).toBe('doc');
   });
 });
+
+describe('markdownPlugin capability', () => {
+  it('markdown は view capability を持つ', () => {
+    const result = markdownPlugin.run({ bucketId: 'b', key: 'a.md', name: 'a.md', contentType: 'text/markdown', size: 1, uploadedAt: '2026-01-01T00:00:00.000Z', etag: '"x"' });
+    expect(result.isOk() && result.value.capability.kind).toBe('view');
+  });
+});

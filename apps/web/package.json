@@ -24,6 +24,8 @@
     "react-aria": "3.51.0",
     "react-aria-components": "^1.20.0",
     "react-dom": "catalog:",
+    "react-markdown": "^10.1.0",
+    "remark-gfm": "^4.0.1",
     "shiki": "^4.4.3"
   },
   "devDependencies": {
