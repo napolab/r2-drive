@@ -5,7 +5,8 @@ import { ResultAsync } from 'neverthrow';
 import { z } from 'zod';
 
 import { toErrorResponse } from '../errors/to-error-response';
-import { indexRemove, resolveObjectIndex } from '../object-index/registry';
+import { runObjectHooks } from '../hooks/object-hook/registry';
+import { resolveObjectIndex } from '../object-index/registry';
 import { deleteObject } from '../r2/delete';
 import { resolveObjectSource } from '../plugins/object-source/registry';
 import { getObject } from '../r2/get';
@@ -196,13 +197,21 @@ export const buckets = new Hono<HonoEnv>()
     const bucketId = c.req.param('bucketId');
 
     return resolveBucket(c.env, bucketId).match(
-      async (bucket) =>
-        deleteObject(bucket, key)
-          .andThen((deleted) => indexRemove(c.env, bucketId, key).map(() => deleted))
-          .match(
-            (deleted) => c.json({ deleted }, 200),
-            (error) => toErrorResponse(c, error),
-          ),
+      async (bucket) => {
+        const result = await deleteObject(bucket, key);
+
+        return result.match(
+          async (deleted) => {
+            // hook(索引からの削除)が失敗しても、この直前の delete はすでに R2 上で
+            // 成功している。R2 が真実であるという spec の原則に従い、索引の失敗で
+            // レスポンスを変えない(uploads 側の同種コメント参照)。
+            await runObjectHooks({ kind: 'removed', env: c.env, bucketId, key });
+
+            return c.json({ deleted }, 200);
+          },
+          (error) => toErrorResponse(c, error),
+        );
+      },
       async (error) => toErrorResponse(c, error),
     );
   });
