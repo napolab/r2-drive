@@ -164,7 +164,9 @@ R2 range read が走り、I3 で測った「読み取りブロック最大 3.2 �
 
 ### 6.3 `SkylineLayout`(react-aria custom Layout)
 
-- 参照実装の `pack.ts` / `layout.ts` / `compute-blanks.ts` を**テストごと移植**する。
+- 参照実装の `pack.ts` / `compute-blanks.ts` を**テストごと移植**する
+  (`layout.ts` の中身は wide 画像の span 判定 `spanForAspect` のみで、span=1 方針(§9)では
+  使わないため移植しない)。
   純ロジックだが「apps/web のギャラリー専用」なので置き場所は
   `apps/web/src/routes/-components/gallery/skyline/`(packages/ に上げるのは 2 つ目の
   利用者が現れてから)
