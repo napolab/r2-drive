@@ -108,6 +108,22 @@ describe('GalleryView', () => {
     const img = container.querySelector('img');
     expect(img?.getAttribute('src')).toBe('/content/b.png');
   });
+
+  // object-list の FileRow は getObjectRowId(`f:${key}`)を GridListItem の id に使う。
+  // Task 9 で選択状態(bucket-object-actions)を object-list と gallery で共有する前提なので、
+  // gallery の画像セルも同じキー空間で選択される必要がある(でないと bulk actions や
+  // folder ガードから gallery 経由の選択がすり抜ける)。
+  it('画像セルの選択は object-list と同じ getObjectRowId(`f:${key}`)形式のキーで通知される', async () => {
+    const onSelectionChange = vi.fn();
+    renderGallery({ folders: [], objects: [make('a.png', 'image/png', { kind: 'image', width: 800, height: 600 })], onSelectionChange });
+
+    await userEvent.tab();
+    await userEvent.keyboard(' ');
+
+    const selection: unknown = onSelectionChange.mock.calls.at(-1)?.[0];
+    if (!(selection instanceof Set)) throw new Error('selection was not a Set');
+    expect([...selection]).toEqual(['f:a.png']);
+  });
 });
 
 describe('isGalleryImage', () => {

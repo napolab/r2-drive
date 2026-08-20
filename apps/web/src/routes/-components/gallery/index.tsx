@@ -4,6 +4,7 @@ import { Button, Collection, GridList, GridListItem, GridListLoadMoreItem, Virtu
 
 import { FileIcon, FilePreviewIcon } from '../../../components/file-icon/index';
 import { resolveFileType } from '../../../plugins/file-type/registry';
+import { getObjectRowId } from '../object-list/row-id';
 import { SkylineLayout } from './skyline-layout/index';
 import * as styles from './styles.css';
 
@@ -32,8 +33,10 @@ export const GalleryView = ({ folders, objects, getContentUrl, selectedKeys, onS
   const others = useMemo(() => objects.filter((object) => !isGalleryImage(object)), [objects]);
 
   // ratioOf は key ごとに毎回 O(n) で objects を舐めない — 実装では Map 化する
-  // (Task 8 brief の指示どおり)。
-  const imagesByKey = useMemo(() => new Map(images.map((object) => [object.key, object])), [images]);
+  // (Task 8 brief の指示どおり)。GridListItem の id は選択モデルの共有キー
+  // (getObjectRowId = `f:${key}`)を使う(下記 GalleryImageCell 参照)ので、
+  // SkylineLayout が渡してくる key もその形になる — Map もそれで引く。
+  const imagesByKey = useMemo(() => new Map(images.map((object) => [getObjectRowId(object), object])), [images]);
   const ratioOf = useCallback(
     (key: Key) => {
       const object = imagesByKey.get(`${key}`);
@@ -52,7 +55,7 @@ export const GalleryView = ({ folders, objects, getContentUrl, selectedKeys, onS
     <div className={styles.root}>
       <ChipList folders={folders} objects={others} onOpenFolder={onOpenFolder} onOpenObject={onOpenObject} />
       <Virtualizer layout={SkylineLayout} layoutOptions={layoutOptions}>
-        <GridList aria-label="画像一覧" className={styles.gridRoot} selectionMode="multiple" selectedKeys={selectedKeys} onSelectionChange={onSelectionChange}>
+        <GridList aria-label="画像一覧" className={styles.gridRoot} layout="grid" selectionMode="multiple" selectedKeys={selectedKeys} onSelectionChange={onSelectionChange}>
           <Collection items={images}>{renderImage}</Collection>
           {/* 末尾のセンチネル。object-list と同じく、次ページの取得もコレクションの一部。 */}
           <GridListLoadMoreItem className={styles.loadMore} onLoadMore={onLoadMore} isLoading={isLoadingMore} />
@@ -110,7 +113,7 @@ const ChipList = ({ folders, objects, onOpenFolder, onOpenObject }: ChipListProp
   const hiddenCount = entries.length - COLLAPSED_CHIP_COUNT;
 
   return (
-    <div className={styles.chipListRoot} aria-label="フォルダとファイル">
+    <div className={styles.chipListRoot} role="group" aria-label="フォルダとファイル">
       {visibleEntries.map((entry) => renderChipEntry(entry, onOpenFolder, onOpenObject))}
       {isCollapsible && state.kind === 'collapsed' ? (
         <Button className={styles.chipMore} onPress={handleExpand}>
@@ -167,7 +170,11 @@ const GalleryImageCell = ({ object, getContentUrl, onOpenObject }: GalleryImageC
   const handleAction = useCallback(() => onOpenObject(object.key), [object.key, onOpenObject]);
 
   return (
-    <GridListItem id={object.key} textValue={object.name} className={styles.cell} onAction={handleAction}>
+    // id は選択モデルの共有キー(getObjectRowId = `f:${key}`)。object-list の FileRow
+    // と同じ id を使うことで、Task 9 でセレクションを共有しても bulk actions や
+    // folder ガードから gallery の選択が漏れない。onAction 側は viewer 契約(生 key)
+    // のまま — object.key を渡す(id とは別物)。
+    <GridListItem id={getObjectRowId(object)} textValue={object.name} className={styles.cell} onAction={handleAction}>
       {hasLoadError ? (
         <span className={styles.cellFallback} data-preview-kind="icon">
           <FilePreviewIcon glyph="image" />
