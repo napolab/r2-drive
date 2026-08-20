@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { resolveFileType } from './registry';
+import { fileTypePlugins, resolveFileType } from './registry';
 
 import type { ObjectDescriptor } from '@r2-drive/core';
 
@@ -41,5 +41,11 @@ describe('resolveFileType', () => {
 
   it('opaque は常にマッチするので err にならない', () => {
     expect(resolveFileType(object('', ''))?.isOk()).toBe(true);
+  });
+
+  it('text は audio の後・opaque の前', () => {
+    const ids = fileTypePlugins.map((plugin) => plugin.id);
+    expect(ids.indexOf('text')).toBeGreaterThan(ids.indexOf('audio'));
+    expect(ids.indexOf('text')).toBeLessThan(ids.indexOf('opaque'));
   });
 });

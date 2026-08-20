@@ -119,9 +119,10 @@ describe('BucketObjectActions', () => {
     const user = userEvent.setup();
     renderActions(queryClient, { folders: [], objects });
 
-    const first = await screen.findByText('a.txt');
-    await user.click(first);
-    await user.keyboard('{Delete}');
+    const firstTile = (await screen.findByText('a.txt')).closest('[data-kind="object"]');
+    if (!(firstTile instanceof HTMLElement)) throw new Error('object tile was not rendered');
+    firstTile.focus();
+    await user.keyboard(' {Delete}');
     await user.click(await screen.findByRole('button', { name: '削除' }));
 
     await waitFor(() => expect(getCachedObjectKeys(queryClient, queryKey)).toEqual(['docs/b.txt', 'docs/c.txt']));
@@ -145,8 +146,10 @@ describe('BucketObjectActions', () => {
     const user = userEvent.setup();
     renderActions(queryClient, { folders: [], objects });
 
-    await user.click(await screen.findByText('a.txt'));
-    await user.keyboard('{Delete}');
+    const firstTile = (await screen.findByText('a.txt')).closest('[data-kind="object"]');
+    if (!(firstTile instanceof HTMLElement)) throw new Error('object tile was not rendered');
+    firstTile.focus();
+    await user.keyboard(' {Delete}');
     await user.click(await screen.findByRole('button', { name: '削除' }));
     await waitFor(() => expect(getCachedObjectKeys(queryClient, queryKey)).toEqual(['docs/b.txt', 'docs/c.txt']));
 
@@ -189,7 +192,8 @@ describe('BucketObjectActions', () => {
     const secondTile = second.closest('[data-kind="object"]');
     const thirdTile = third.closest('[data-kind="object"]');
     if (!(firstTile instanceof HTMLElement) || !(secondTile instanceof HTMLElement) || !(thirdTile instanceof HTMLElement)) throw new Error('object tiles were not rendered');
-    await user.click(firstTile);
+    firstTile.focus();
+    await user.keyboard(' ');
     await user.keyboard('{Control>}{Meta>}');
     await user.click(secondTile);
     await user.keyboard('{/Meta}{/Control}');

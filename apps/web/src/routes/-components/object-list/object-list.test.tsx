@@ -410,8 +410,9 @@ describe('ObjectList', () => {
     const folderTile = screen.getByText('docs').closest('[data-kind="folder"]');
     const fileTile = screen.getByText('f0.txt').closest('[data-kind="object"]');
 
+    // f0.txt(text/plain)は Task 11 の textPlugin が拾うので doc glyph になる(opaque の blank ではない)。
     expect(folderTile?.querySelector('[data-preview-kind="folder"] svg[data-glyph="folder"]')).toBeTruthy();
-    expect(fileTile?.querySelector('[data-preview-kind="icon"] svg[data-glyph="blank"]')).toBeTruthy();
+    expect(fileTile?.querySelector('[data-preview-kind="icon"] svg[data-glyph="doc"]')).toBeTruthy();
   });
 
   it('長い名前と短い名前でも仮想化タイルの高さを 240px に揃える', () => {
