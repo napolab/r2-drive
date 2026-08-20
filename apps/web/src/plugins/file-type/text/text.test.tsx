@@ -76,8 +76,8 @@ describe('TextViewer', () => {
     vi.unstubAllGlobals();
   });
 
-  it('size が上限を超えるときは fetch を発行せず too-large 表示になる', async () => {
-    const fetchSpy = vi.fn();
+  it('size が上限を超えるときは Range 付きで先頭 128 KiB だけ fetch する(全文は取らない)', async () => {
+    const fetchSpy = vi.fn().mockResolvedValue(new Response('a\nb\nc', { status: 206 }));
     vi.stubGlobal('fetch', fetchSpy);
 
     const object = make('big.txt', 'text/plain', MAX_TEXT_VIEWER_BYTES + 1);
@@ -87,7 +87,8 @@ describe('TextViewer', () => {
       </QueryClientProvider>,
     );
 
-    expect(await screen.findByText(/表示できません/)).toBeTruthy();
-    expect(fetchSpy).not.toHaveBeenCalled();
+    expect(await screen.findByText(/先頭 300 行のみ表示/)).toBeTruthy();
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+    expect(fetchSpy).toHaveBeenCalledWith('/content/big.txt', { headers: { range: 'bytes=0-131071' } });
   });
 });

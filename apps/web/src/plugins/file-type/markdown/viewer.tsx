@@ -3,7 +3,7 @@ import Markdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 
 import { CodeBlock } from '../../../components/code-block/index';
-import { ViewerTooLarge } from '../../../components/viewer-too-large/index';
+import { ViewerHeadPreview } from '../../../components/viewer-head-preview/index';
 import { objectTextQuery } from '../../../queries/object-text';
 import { admitTextViewer } from '../text-viewer-limit';
 import * as styles from './styles.css';
@@ -31,7 +31,7 @@ const MarkdownViewer = ({ object, getContentUrl }: ViewerProps) => {
 
   switch (admission.kind) {
     case 'too-large':
-      return <ViewerTooLarge object={object} getContentUrl={getContentUrl} />;
+      return <ViewerHeadPreview object={object} getContentUrl={getContentUrl} language="markdown" />;
     case 'ok':
       return <MarkdownContent url={getContentUrl(object)} />;
     default: {

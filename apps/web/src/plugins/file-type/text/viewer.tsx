@@ -1,7 +1,7 @@
 import { useSuspenseQuery } from '@tanstack/react-query';
 
 import { CodeBlock } from '../../../components/code-block/index';
-import { ViewerTooLarge } from '../../../components/viewer-too-large/index';
+import { ViewerHeadPreview } from '../../../components/viewer-head-preview/index';
 import { objectTextQuery } from '../../../queries/object-text';
 import { admitTextViewer } from '../text-viewer-limit';
 import { languageOf } from './index';
@@ -13,7 +13,7 @@ const TextViewer = ({ object, getContentUrl }: ViewerProps) => {
 
   switch (admission.kind) {
     case 'too-large':
-      return <ViewerTooLarge object={object} getContentUrl={getContentUrl} />;
+      return <ViewerHeadPreview object={object} getContentUrl={getContentUrl} language={languageOf(object.name)} />;
     case 'ok':
       return <TextContent url={getContentUrl(object)} language={languageOf(object.name)} />;
     default: {

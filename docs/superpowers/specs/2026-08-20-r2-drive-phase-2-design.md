@@ -191,10 +191,19 @@ export const playbackResolvers = [
 
 ### 6.2 テキスト系のサイズ上限
 
-- markdown / text ビューアは本文全体をクライアントに読む。**上限 1 MiB**
-- `descriptor.size` で事前判定し、超過時は fetch 自体を発行せず
-  「大きすぎるため表示できません(サイズ表示)+ ダウンロード」の案内を出す
-- 上限は viewer 側の定数とし、単体テストでガードの発火を検証する
+- markdown / text ビューアは通常、本文全体をクライアントに読む。**上限 1 MiB**
+- `descriptor.size` で事前判定し、上限を超えるファイルは**全文 fetch を発行しない**。
+  代わりに content endpoint の Range 対応(6.1)を使い、`Range: bytes=0-131071`
+  (先頭 128 KiB)だけを取得する
+- 取得したチャンクを `headLines` で先頭 300 行に切り、
+  `ViewerHeadPreview`(`apps/web/src/components/viewer-head-preview/`)が
+  「先頭 300 行のみ表示(全体サイズ)」の案内 + ダウンロード導線 + ハイライト済みコードを表示する。
+  markdown はレンダリングせず `language="markdown"` で source のまま表示する
+  (壊れた半端な markdown を描画しないため)
+- サーバーが Range を無視して 200 で全文を返しても `res.ok` は true なのでそのまま動く
+  (先頭 300 行への切り詰めはクライアント側の `headLines` が担う)
+- 上限・プレビュー行数(`HEAD_PREVIEW_MAX_LINES = 300`)は viewer 側の定数とし、
+  単体テストでガードの発火と行数の切り詰めを検証する
 
 ## 7. shiki と `code.*` token
 
@@ -252,6 +261,7 @@ Range 配信は Phase 0 のテストでカバー済み。本 Phase では追加�
 3. 動画・音楽がシーク可能である(206 応答で任意位置から再生できる)
 4. markdown が GFM(テーブル・タスクリスト)込みでレンダリングされ、コードブロックがハイライトされる
 5. ←/→ で同一フォルダ内の前後ファイルへ移動でき、ブラウザバック 1 回でビューアが閉じる
-6. 1 MiB 超のテキスト系ファイルは fetch されず、案内とダウンロード導線が表示される
+6. 1 MiB 超のテキスト系ファイルは全文 fetch されず、Range で取得した先頭 300 行と
+   案内・ダウンロード導線が表示される
 7. `code.*` token を含む全 color token が AA 検証テストを通過している
 8. 一覧の初期バンドルに viewer / shiki / react-markdown のチャンクが含まれていない
