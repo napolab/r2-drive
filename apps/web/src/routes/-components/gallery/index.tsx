@@ -53,6 +53,16 @@ export const GalleryView = ({ objects, getContentUrl, selectedKeys, onSelectionC
   );
   const layoutOptions = useMemo(() => ({ ratioOf }), [ratioOf]);
 
+  // react-aria の cmd+A は Selection = 'all' という抽象センチネルを渡す。共有 state
+  // (resolveSelectedRows, model.ts)はこれをルートレベルの folders+objects に対して
+  // 実体化するため、そのまま流すと gallery が表示していないフォルダ/非メディアまで
+  // 選択対象に含まれてしまう(folder ガードの誤爆・非表示ファイルへの誤操作)。
+  // gallery 由来の選択は常に具体的な id 集合として共有 state に渡す。
+  const handleGallerySelectionChange = useCallback(
+    (selection: Selection) => onSelectionChange(selection === 'all' ? new Set(mediaObjects.map(getObjectRowId)) : selection),
+    [mediaObjects, onSelectionChange],
+  );
+
   const renderMedia = useCallback(
     (object: ObjectDescriptor) => <GalleryMediaCell key={object.key} object={object} getContentUrl={getContentUrl} onOpenObject={onOpenObject} />,
     [getContentUrl, onOpenObject],
@@ -83,7 +93,7 @@ export const GalleryView = ({ objects, getContentUrl, selectedKeys, onSelectionC
           layout="grid"
           selectionMode="multiple"
           selectedKeys={selectedKeys}
-          onSelectionChange={onSelectionChange}
+          onSelectionChange={handleGallerySelectionChange}
           dragAndDropHooks={dragAndDropHooks}
         >
           <Collection items={mediaObjects}>{renderMedia}</Collection>

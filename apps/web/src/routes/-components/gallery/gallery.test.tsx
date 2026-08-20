@@ -110,6 +110,29 @@ describe('GalleryView', () => {
     if (!(selection instanceof Set)) throw new Error('selection was not a Set');
     expect([...selection]).toEqual(['f:a.png']);
   });
+
+  // react-aria の cmd+A は Selection = 'all' という抽象センチネルを渡してくる。
+  // resolveSelectedRows(model.ts)はこれをルートレベルの folders+objects に対して
+  // 実体化するので、gallery の GridList(メディアのみを保持)に対して 'all' のまま
+  // 共有 state に流すと、実際には表示していないフォルダ/非メディアまで対象に
+  // 含めてしまう。gallery 側で 'all' を mediaObjects の具体的な id 集合に
+  // 変換してから onSelectionChange へ渡す必要がある。
+  it("cmd+A の選択は mediaObjects の具体的な行 id セットに解決されて渡る('all' センチネルのまま伝播しない)", async () => {
+    const onSelectionChange = vi.fn();
+    renderGallery({
+      objects: [make('a.png', 'image/png', { kind: 'image', width: 800, height: 600 }), make('b.png', 'image/png', { kind: 'image', width: 800, height: 600 })],
+      onSelectionChange,
+    });
+
+    await userEvent.tab();
+    // jsdom は navigator.platform で Mac と判定されないため、react-aria の
+    // select-all ショートカットは Meta ではなく Ctrl 側で発火する。
+    await userEvent.keyboard('{Control>}a{/Control}');
+
+    const selection: unknown = onSelectionChange.mock.calls.at(-1)?.[0];
+    if (!(selection instanceof Set)) throw new Error("selection was not a concrete Set ('all' sentinel leaked through)");
+    expect([...selection].sort()).toEqual(['f:a.png', 'f:b.png']);
+  });
 });
 
 describe('isGalleryMedia', () => {

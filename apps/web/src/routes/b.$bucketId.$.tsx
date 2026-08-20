@@ -20,7 +20,10 @@ import type { ViewerRequest } from './-components/object-viewer/index';
 // URL search は「無い」状態が正当なので optional。variant への変換は useSearch 直後に行い、
 // optional をコンポーネント境界より内側に持ち込まない。gallery は無指定で表す
 // (既定値を URL に書かない) — `mode` は 'tiles' の存在だけが意味を持つ。
-const viewerSearchSchema = z.object({ view: z.string().optional(), mode: z.enum(['tiles']).optional() });
+// 未知の値(手打ちの `?mode=gallery` 等)は validateSearch の throw でルート全体を
+// エラー画面に落とすのではなく、`.catch(undefined)` で無指定(= gallery)へ degrade する。
+// テストは b.$bucketId.$.test.ts で schema を直接 import して検証する(router 経由にしない)。
+export const viewerSearchSchema = z.object({ view: z.string().optional(), mode: z.enum(['tiles']).optional().catch(undefined) });
 
 // content-addressed URL。etag を ?v= に載せることで、サーバが「この URL は
 // この中身しか指さない」と判断でき immutable を返せる(戻るたびの再ダウンロードを消す)。
