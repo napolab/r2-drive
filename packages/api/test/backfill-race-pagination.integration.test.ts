@@ -47,7 +47,7 @@ it('2 ページ目の list 後に live remove されたキーは複数ページ�
   // 一度も発火せず「何も検証していないテスト」になる。到達を直接確認する。
   await expect(stub.debugBackfillPageCalls()).resolves.toBe(2);
 
-  await expect(stub.status()).resolves.toEqual({ kind: 'complete', indexed: TOTAL - 1 });
+  await expect(stub.status()).resolves.toEqual({ kind: 'complete', indexed: TOTAL - 1, mediaPending: 0 });
   // 割り込みで消された 2 ページ目のキーは復活していない。
   await expect(stub.debugRow(victim)).resolves.toBeUndefined();
   // 1 ページ目・2 ページ目それぞれの生存キーは両方とも索引されている。

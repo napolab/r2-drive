@@ -563,7 +563,7 @@ describe('ObjectIndex のバックフィル', () => {
 
     const listed = await env.BUCKET_PHOTOS.list({ limit: 1000 });
     expect(listed.truncated).toBe(false);
-    await expect(stub.status()).resolves.toEqual({ kind: 'complete', indexed: listed.objects.length });
+    await expect(stub.status()).resolves.toEqual({ kind: 'complete', indexed: listed.objects.length, mediaPending: 0 });
     await expect(stub.debugRow('bf/a/3.txt')).resolves.toMatchObject({ name: '3.txt', parentPrefix: 'bf/a/' });
   });
 
@@ -594,7 +594,7 @@ describe('ObjectIndex のバックフィル', () => {
     await waitForBackfill(stub);
 
     await expect(stub.count()).resolves.toBe(first);
-    await expect(stub.status()).resolves.toEqual({ kind: 'complete', indexed: first });
+    await expect(stub.status()).resolves.toEqual({ kind: 'complete', indexed: first, mediaPending: 0 });
   });
 
   // startBackfill は meta に backfill_* を書くが、bucket_id(Ruling 11 の誤ルーティング

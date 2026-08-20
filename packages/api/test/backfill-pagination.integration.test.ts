@@ -36,7 +36,7 @@ it('1 ページを超えるバケットをカーソルで継いで全件取り�
   await stub.startBackfill('photos');
   await waitForBackfill(stub);
 
-  await expect(stub.status()).resolves.toEqual({ kind: 'complete', indexed: TOTAL });
+  await expect(stub.status()).resolves.toEqual({ kind: 'complete', indexed: TOTAL, mediaPending: 0 });
   // 2 ページ目の先頭。1 ページ目だけで終わる実装だとこの行が存在しない。
   await expect(stub.debugRow('page/01000.txt')).resolves.toMatchObject({ name: '01000.txt', parentPrefix: 'page/' });
 
