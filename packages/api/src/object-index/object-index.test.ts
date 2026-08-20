@@ -48,6 +48,8 @@ describe('ObjectIndex の書き込み', () => {
       size: 999,
       uploadedAt: '2026-08-17T00:00:00.000Z',
       etag: '"new"',
+      width: null,
+      height: null,
     });
   });
 

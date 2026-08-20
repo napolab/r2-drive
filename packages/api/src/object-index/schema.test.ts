@@ -37,7 +37,7 @@ describe('schema.ts の Drizzle 定義と適用済み DDL が一致する', () =
   // 上の 2 本が「両方とも空」で通ってしまわないための positive control。
   // PRAGMA が読めていない / テーブル名が間違っているときにここが落ちる。
   it('Drizzle 定義側が空でないことを確かめる', () => {
-    expect(getTableConfig(objects).columns.map((column) => column.name)).toEqual(['key', 'name', 'parent_prefix', 'content_type', 'size', 'uploaded_at', 'etag']);
+    expect(getTableConfig(objects).columns.map((column) => column.name)).toEqual(['key', 'name', 'parent_prefix', 'content_type', 'size', 'uploaded_at', 'etag', 'width', 'height']);
     expect(getTableConfig(objects).indexes.map((index) => index.config.name)).toEqual(['objects_by_folder']);
     expect(getTableConfig(prefixes).indexes.map((index) => index.config.name)).toEqual(['prefixes_by_parent']);
   });

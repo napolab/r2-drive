@@ -1,4 +1,4 @@
-import { NO_MEDIA } from '@r2-drive/core';
+import { mediaOf, NO_MEDIA } from '@r2-drive/core';
 import { and, asc, count as countRows, eq, gt, ne } from 'drizzle-orm';
 
 import { contentTypeOf } from '../r2/list';
@@ -80,6 +80,8 @@ type ObjectRow = {
   readonly size: number;
   readonly uploaded_at: string;
   readonly etag: string;
+  readonly width: number | null;
+  readonly height: number | null;
 };
 
 export class ObjectIndex extends SqliteStore {
@@ -99,10 +101,13 @@ export class ObjectIndex extends SqliteStore {
   // object.name は保存しない。name は key から一意に決まる派生値なので、
   // keyPartsOf(key).name を唯一の出典にする(呼び出し側が矛盾した name を渡しても
   // 索引は key に従う)。
-  // object.media は今はまだ無視する。width / height 列が存在しない(Task 2 で
-  // schema に列を足し、ここで書き込むようになる)。
+  //
+  // media が 'none' のときは width/height 列を updates に含めない(触らない)。
+  // 再アップロードや再バックフィルで寸法未知の descriptor が来ても、setMediaFacts が
+  // 後から埋めた既存値を上書きで消さないようにするため(brief のテスト 4 番目)。
   upsert(object: ObjectDescriptor): void {
     const { name, parentPrefix, ancestorPrefixes } = keyPartsOf(object.key);
+    const mediaUpdates = object.media.kind === 'image' ? { width: object.media.width, height: object.media.height } : {};
     const updates = {
       name,
       parentPrefix,
@@ -110,6 +115,7 @@ export class ObjectIndex extends SqliteStore {
       size: object.size,
       uploadedAt: object.uploadedAt,
       etag: object.etag,
+      ...mediaUpdates,
     };
 
     this.db.transaction((tx) => {
@@ -140,6 +146,16 @@ export class ObjectIndex extends SqliteStore {
       this.ctx.storage.sql.exec(`DELETE FROM objects_fts WHERE key = ?`, key);
       this.#tombstoneIfBackfillRunning(tx, key);
     });
+  }
+
+  // 寸法の後付け(ObjectHook の mediaFacts / バックフィルの追い掛けが使う。Task 4-5)。
+  // 行が無ければ何もしない: 抽出中に削除されたキーへの UPDATE は 0 行更新で終わるのが
+  // 正しい(消えたキーへの後追いを例外にしない)。0 を弾かない — Task 5 は 0/0 を
+  // 「試したが寸法が取れなかった」マーカーとして書く。ワイヤ境界(0 以下は
+  // variant:'none' に落とす)の判定は列に書く側ではなく mediaOf(list/search の読み取り側)
+  // が単独で持つ(CQS: これはコマンドなので void を返す)。
+  setMediaFacts(key: string, width: number, height: number): void {
+    this.db.update(objects).set({ width, height }).where(eq(objects.key, key)).run();
   }
 
   // バックフィル走行中(meta.backfill_state === 'running')の remove だけトゥームストーンを
@@ -208,8 +224,7 @@ export class ObjectIndex extends SqliteStore {
         size: row.size,
         uploadedAt: row.uploadedAt,
         etag: row.etag,
-        // 列がまだ無い(Task 2 で mediaOf(row.width, row.height) に置換する)。
-        media: NO_MEDIA,
+        media: mediaOf(row.width, row.height),
       })),
       next,
     };
@@ -328,8 +343,7 @@ export class ObjectIndex extends SqliteStore {
         size: row.size,
         uploadedAt: row.uploaded_at,
         etag: row.etag,
-        // 列がまだ無い(Task 2 で mediaOf(row.width, row.height) に置換する)。
-        media: NO_MEDIA,
+        media: mediaOf(row.width, row.height),
       })),
       next,
     };
