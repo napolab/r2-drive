@@ -12,5 +12,9 @@ const VideoPreview = (_props: PreviewProps) => (
 
 export const videoPlugin: FileTypePlugin = {
   id: 'video',
-  run: (object) => (object.contentType.startsWith('video/') ? ok({ typeId: 'video', label: '動画', Icon: (props) => <FileIcon {...props} glyph="video" />, Preview: VideoPreview }) : err(object)),
+  run: (object) =>
+    object.contentType.startsWith('video/')
+      ? // Task 5(video/audio)/ Task 10(markdown)で view に昇格する暫定値
+        ok({ typeId: 'video', label: '動画', Icon: (props) => <FileIcon {...props} glyph="video" />, Preview: VideoPreview, capability: { kind: 'opaque' } })
+      : err(object),
 };

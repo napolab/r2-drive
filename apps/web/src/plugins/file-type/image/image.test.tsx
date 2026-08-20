@@ -43,4 +43,9 @@ describe('imagePlugin preview', () => {
     expect(container.querySelector('img')).toBeNull();
     expect(container.querySelector('svg')?.dataset.glyph).toBe('image');
   });
+
+  it('image は view capability を持つ', () => {
+    const result = imagePlugin.run(object);
+    expect(result.isOk() && result.value.capability.kind).toBe('view');
+  });
 });

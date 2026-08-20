@@ -16,6 +16,7 @@ export const markdownPlugin: FileTypePlugin = {
   id: 'markdown',
   run: (object) =>
     EXTENSIONS.some((ext) => object.name.toLowerCase().endsWith(ext)) || object.contentType === 'text/markdown'
-      ? ok({ typeId: 'markdown', label: 'Markdown', Icon: (props) => <FileIcon {...props} glyph="doc" />, Preview: MarkdownPreview })
+      ? // Task 5(video/audio)/ Task 10(markdown)で view に昇格する暫定値
+        ok({ typeId: 'markdown', label: 'Markdown', Icon: (props) => <FileIcon {...props} glyph="doc" />, Preview: MarkdownPreview, capability: { kind: 'opaque' } })
       : err(object),
 };

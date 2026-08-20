@@ -1,10 +1,12 @@
 import { err, ok } from 'neverthrow';
-import { useCallback, useState } from 'react';
+import { lazy, useCallback, useState } from 'react';
 
 import { FileIcon, FilePreviewIcon } from '../../../components/file-icon/index';
 import * as styles from './styles.css';
 
 import type { FileTypePlugin, PreviewProps } from '../types';
+
+const ImageViewer = lazy(() => import('./viewer'));
 
 const ImagePreview = ({ object, getContentUrl }: PreviewProps) => {
   const [hasLoadError, setHasLoadError] = useState(false);
@@ -23,5 +25,8 @@ const ImagePreview = ({ object, getContentUrl }: PreviewProps) => {
 
 export const imagePlugin: FileTypePlugin = {
   id: 'image',
-  run: (object) => (object.contentType.startsWith('image/') ? ok({ typeId: 'image', label: '画像', Icon: (props) => <FileIcon {...props} glyph="image" />, Preview: ImagePreview }) : err(object)),
+  run: (object) =>
+    object.contentType.startsWith('image/')
+      ? ok({ typeId: 'image', label: '画像', Icon: (props) => <FileIcon {...props} glyph="image" />, Preview: ImagePreview, capability: { kind: 'view', Viewer: ImageViewer } })
+      : err(object),
 };

@@ -12,5 +12,9 @@ const AudioPreview = (_props: PreviewProps) => (
 
 export const audioPlugin: FileTypePlugin = {
   id: 'audio',
-  run: (object) => (object.contentType.startsWith('audio/') ? ok({ typeId: 'audio', label: '音声', Icon: (props) => <FileIcon {...props} glyph="audio" />, Preview: AudioPreview }) : err(object)),
+  run: (object) =>
+    object.contentType.startsWith('audio/')
+      ? // Task 5(video/audio)/ Task 10(markdown)で view に昇格する暫定値
+        ok({ typeId: 'audio', label: '音声', Icon: (props) => <FileIcon {...props} glyph="audio" />, Preview: AudioPreview, capability: { kind: 'opaque' } })
+      : err(object),
 };
